@@ -125,14 +125,20 @@ def locate_pulses(stim_seq, amp_range=(0, 0.001)):
     clean_onset = np.flatnonzero(np.diff(stim_seq_cln) < 0)
     clean_offset = np.flatnonzero(np.diff(stim_seq_cln) > 0) + 1
 
-    # Flip the clean onset/offset depending on the edge case
-    if clean_offset[0] < clean_onset[0]:
-        clean_tmp = clean_offset.copy()
-        clean_offset = clean_onset.copy()
-        clean_onset = clean_tmp.copy()
+    if (len(clean_offset) == 0) | (len(clean_onset) == 0):
+        clean_offset = []
+        clean_onset = []
+    else:
+
+        # Flip the clean onset/offset depending on the edge case
+        if clean_offset[0] < clean_onset[0]:
+            clean_tmp = clean_offset.copy()
+            clean_offset = clean_onset.copy()
+            clean_onset = clean_tmp.copy()
 
     # Ensure there are an equal number of onsets and offsets
     clip = np.min([len(clean_onset), len(clean_offset)])
+
     clean_inds = np.array([clean_onset[:clip], clean_offset[:clip]])
 
     return pulse_inds, clean_inds
@@ -167,21 +173,25 @@ def parse_stim_seq_to_trains(stim_seq, max_inter_pulse, pulse_inds):
     on_inds = pulse_inds[0, :]
     off_inds = pulse_inds[1, :]
 
-    # Ensure the max inter-pulse interval is an integer
-    max_inter_pulse = int(np.ceil(max_inter_pulse))
+    if not ((len(on_inds) == 0) | (len(off_inds) == 0)):
+        # Ensure the max inter-pulse interval is an integer
+        max_inter_pulse = int(np.ceil(max_inter_pulse))
 
-    # Construct an indicator function for epochs
-    epoch = np.ones(len(stim_seq))
-    epoch[:on_inds[0]] = 0
-    for ii, (ix_1, ix_2) in enumerate(zip(on_inds[:-1], on_inds[1:])):
-        if (ix_2 - ix_1) > max_inter_pulse:
-            epoch[off_inds[:-1][ii]:ix_2] = 0
-    epoch[off_inds[-1]:] = 0
+        # Construct an indicator function for epochs
+        epoch = np.ones(len(stim_seq))
+        epoch[:on_inds[0]] = 0
+        for ii, (ix_1, ix_2) in enumerate(zip(on_inds[:-1], on_inds[1:])):
+            if (ix_2 - ix_1) > max_inter_pulse:
+                epoch[off_inds[:-1][ii]:ix_2] = 0
+        epoch[off_inds[-1]:] = 0
 
-    # Use the boundaries of the indicator function to demarcate the
-    # onset and offset samples corresponding to an epoch.
-    epoch_onset = np.flatnonzero(np.diff(epoch) > 0) + 1
-    epoch_offset = np.flatnonzero(np.diff(epoch) < 0) + 1
+        # Use the boundaries of the indicator function to demarcate the
+        # onset and offset samples corresponding to an epoch.
+        epoch_onset = np.flatnonzero(np.diff(epoch) > 0) + 1
+        epoch_offset = np.flatnonzero(np.diff(epoch) < 0) + 1
+    else:
+        epoch_onset = []
+        epoch_offset = []
     epoch_inds = np.array([epoch_onset, epoch_offset])
 
     return epoch_inds
@@ -291,121 +301,3 @@ def get_stim_param_per_epoch(stim_seq, pulse_inds, epoch_inds):
         epoch_params[key] = np.array(epoch_params[key])
 
     return epoch_params
-
-
-def _clip_pulses_ieeg(df_ieeg, pulse_inds, padding=[50, 50]):
-    """Excise iEEG centered around each pulse"""
-
-    ### Check pulse indices
-    pulse_dur = np.unique(pulse_inds[1] - pulse_inds[0])
-    if len(pulse_dur) > 1:
-        print('Warning: Pulses of different durations detected.' +
-              'Clipping based on maximum pulse duration.')
-    pulse_dur = np.max(pulse_dur)
-
-    # Modify pulse range based on max duration and padding factor
-    pulse_inds_mod = pulse_inds.copy()
-    pulse_inds_mod[1, :] = pulse_inds_mod[0, :] + pulse_dur
-    pulse_inds_mod[0, :] = pulse_inds_mod[0, :] - padding[0]
-    pulse_inds_mod[1, :] = pulse_inds_mod[1, :] + padding[1]
-
-    # Get unique on/off index pairs
-    pulse_inds_mod = np.unique(pulse_inds_mod, axis=1)
-
-    # Remove pulses that lay outside data range
-    pulse_inds_mod = pulse_inds_mod[:, ~(pulse_inds_mod[0, :] < 0)]
-    pulse_inds_mod = pulse_inds_mod[:,
-                                    ~(pulse_inds_mod[1, :] > df_ieeg.shape[0])]
-
-    n_p = pulse_inds_mod.shape[1]
-    n_s = np.unique(pulse_inds_mod[1] - pulse_inds_mod[0])
-    assert len(n_s) == 1
-    n_s = n_s[0]
-    n_c = df_ieeg.shape[1]
-
-    clipped_pulse = np.zeros((n_p, n_c, n_s))
-    for ii, pinds in enumerate(pulse_inds_mod.T):
-        clipped_pulse[ii, :, :] = df_ieeg[pinds[0]:pinds[1], :].T
-
-    return clipped_pulse, pulse_inds_mod
-
-
-def _train_ica(pulse_matr, n_components=None):
-    """Train an ICA model on matrix of concatenated pulses"""
-
-    n_obs, n_feat = pulse_matr.shape
-    ica = FastICA(n_components=n_components, max_iter=1000)
-    ica = ica.fit(pulse_matr)
-
-    return ica
-
-
-def _plot_ica(ica, padding=[50, 50]):
-    """Plot trained ICA model mixing matrix"""
-
-    n_f, n_c = ica.mixing_.shape
-
-    n_row = int(np.ceil(np.sqrt(n_c)))
-    n_col = int(np.ceil(n_c / n_row))
-
-    plt.figure()
-    for ii in range(n_c):
-        ax = plt.subplot(n_row, n_col, ii + 1)
-        ax.plot(ica.mixing_[:, ii], linewidth=0.5, color='k')
-        ax.vlines(
-            padding[0],
-            ax.get_ylim()[0],
-            ax.get_ylim()[1],
-            color='r',
-            linewidth=0.25)
-        ax.vlines(
-            n_f - padding[1],
-            ax.get_ylim()[0],
-            ax.get_ylim()[1],
-            color='r',
-            linewidth=0.25)
-        ax.set_title('Comp.: {}'.format(ii))
-        ax.set_axis_off()
-    plt.show()
-
-
-def _reconstruct_ica(pulse_matr, ica, rm_comp=[]):
-    """Reconstruct concatenated pulses using valid ICs"""
-
-    src = ica.transform(pulse_matr)
-    src[:, rm_comp] = 0
-    recons = src.dot(ica.mixing_.T)
-
-    return recons
-
-
-def _gen_sham_inds(stim_inds, avoid_inds, array_size):
-
-    sham_inds = []
-    for inds in stim_inds.T:
-        ind_len = inds[1] - inds[0]
-
-        limit = 0
-        while limit < 10000:
-            start_ind = np.random.randint(array_size - ind_len)
-            end_ind = start_ind + ind_len
-
-            check_start = ((avoid_inds[0, :] <= start_ind) &
-                           (avoid_inds[1, :] >= start_ind)).any()
-            check_end = ((avoid_inds[0, :] <= end_ind) &
-                         (avoid_inds[1, :] >= end_ind)).any()
-
-            check_span = ((avoid_inds[0, :] >= start_ind) &
-                          (avoid_inds[1, :] <= end_ind)).any()
-
-            if ~(check_start | check_end | check_span):
-                break
-
-            start_ind = np.nan
-            end_ind = np.nan
-            limit += 1
-
-        sham_inds.append([start_ind, end_ind])
-
-    sham_inds = np.array(sham_inds).T
-    return sham_inds
