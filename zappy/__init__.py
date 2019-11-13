@@ -1,1 +1,1 @@
-from . import elstim, sigproc, geometry
+from . import elstim, sigproc, geometry, vis
