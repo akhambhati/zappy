@@ -1,7 +1,9 @@
+# Raw Data Formats and Folders
 DATA.CORE
 DATA.RSRCH
 *.DS_Store
 *.npz
+*.zip
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
