@@ -124,7 +124,7 @@ def plot_ica(ica, padding=[50, 50]):
     n_row = int(np.ceil(np.sqrt(n_c)))
     n_col = int(np.ceil(n_c / n_row))
 
-    plt.figure()
+    plt.figure(figsize=(6,6), dpi=300)
     for ii in range(n_c):
         ax = plt.subplot(n_row, n_col, ii + 1)
         ax.plot(ica.mixing_[:, ii], linewidth=0.5, color='k')
@@ -246,6 +246,7 @@ def ica_pulse_reconstruction(signal,
                              stim_seq,
                              inter_train_len,
                              padding,
+                             amp_range=(0, 0.009),
                              n_components=None,
                              krt_pct=[2.5, 97.5],
                              plot=True,
@@ -276,6 +277,9 @@ def ica_pulse_reconstruction(signal,
         background signal. Increasing padding too high will cause bleeding over
         to adjacent pulses in a continuous stim train.
 
+    amp_range: tuple, shape: (float, float), default is (0, 0.009)
+        The range of amplitudes (in amperes) within which to search for pulses.
+
     n_components: int, default is None
         Number of ICA components to extract from the pulse matrix. 
         If None, the components will be set to the maximum possible --
@@ -305,8 +309,9 @@ def ica_pulse_reconstruction(signal,
     avoid_stim_inds = []
 
     # Iterate over all stim sequences
+    print('Locating stimulation pulses from input sequence...')
     for si in range(stim_seq.shape[1]):
-        pinds, cinds = locate_pulses(stim_seq[:, si])
+        pinds, cinds = locate_pulses(stim_seq[:, si], amp_range=amp_range)
 
         # Add all pulses to aggregate list
         for pp in pinds.T:
@@ -323,16 +328,19 @@ def ica_pulse_reconstruction(signal,
     avoid_stim_inds = np.array(avoid_stim_inds).T
 
     # Generate a set of sham indices using aggregate set of pulse indices
+    print('Determining non-pulse periods to use as control...')
     pulse_sham_inds = gen_sham_inds(pulse_stim_inds, avoid_stim_inds,
                                     signal.shape[0])
 
     # Clip the iEEG (Stim)
+    print('Clipping and aggregating iEEG around stim pulses...')
     feats_stim, pinds_stim_padded = clip_pulses_ieeg(
         signal, pulse_stim_inds, padding=padding)
     n_trial, n_chan, n_feat = feats_stim.shape
     feats_stim = feats_stim.reshape(n_trial * n_chan, n_feat)
 
     # Clip the iEEG (Sham)
+    print('Clipping and aggregating iEEG around non-stim pulses...')
     feats_sham, pinds_sham_padded = clip_pulses_ieeg(
         signal, pulse_sham_inds, padding=padding)
     n_trial1, n_chan1, n_feat1 = feats_sham.shape
@@ -347,9 +355,11 @@ def ica_pulse_reconstruction(signal,
         pinds_stim_padded = pinds_sham_padded.copy()
 
     # Train ICA model
+    print('Training ICA models on stim pulses and non-stim pulses...')
     ica_stim = train_ica(feats_stim, n_components=n_components)
     ica_sham = train_ica(feats_sham, n_components=n_components)
 
+    print('Calculating kurtosis distribution of ICs...')
     # Get Kurtosis of components (Stim)
     krt_stim = sp_stats.kurtosis(ica_stim.mixing_, axis=0, fisher=True)
     ica_stim.components_ = ica_stim.components_[np.argsort(krt_stim)[::-1], :]
@@ -363,6 +373,7 @@ def ica_pulse_reconstruction(signal,
     krt_sham = krt_sham[np.argsort(krt_sham)[::-1]]
 
     # Reconstruct components
+    print('Reconstructing iEEG of stim pulses after removing corrupt components...')
     feats_stim_recons = reconstruct_ica(
         feats_stim,
         ica_stim,
@@ -372,12 +383,14 @@ def ica_pulse_reconstruction(signal,
 
     if plot:
         # Plot Components
-        if plot:
-            plot_ica(ica_stim, padding=padding)
-            plot_ica(ica_sham, padding=padding)
+        print('Independent Components of Stim Pulses...')
+        plot_ica(ica_stim, padding=padding)
+        print('Independent Components of Non-Stim Pulses...')
+        plot_ica(ica_sham, padding=padding)
 
         # Plot IC Kurtosis
-        plt.figure()
+        print('Distribution of Kurtosis values for IC removal...')
+        plt.figure(figsize=(6,6), dpi=300)
         ax = plt.subplot(111)
         ax.plot(krt_stim)
         ax.plot(krt_sham)
@@ -387,6 +400,7 @@ def ica_pulse_reconstruction(signal,
         plt.show()
 
         # Plot example reconstructions
+        print('Example iEEG of stim pulses before/after IC removal...')
         rand_ix = np.random.permutation(len(feats_stim_recons))[:16]
         plt.figure()
         for ii, ix in enumerate(rand_ix):
@@ -396,6 +410,7 @@ def ica_pulse_reconstruction(signal,
             ax.set_axis_off()
 
     # Reconstitute the signal
+    print('Reconstitute full iEEG with cleaned pulse periods...')
     feats_stim_recons = feats_stim_recons.reshape(n_trial, n_chan, n_feat)
     for ii, inds in enumerate(pinds_stim_padded.T):
         for jj in range(signal.shape[1]):
