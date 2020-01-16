@@ -124,7 +124,7 @@ def plot_ica(ica, padding=[50, 50]):
     n_row = int(np.ceil(np.sqrt(n_c)))
     n_col = int(np.ceil(n_c / n_row))
 
-    plt.figure(figsize=(6,6), dpi=300)
+    plt.figure(figsize=(12,12), dpi=300)
     for ii in range(n_c):
         ax = plt.subplot(n_row, n_col, ii + 1)
         ax.plot(ica.mixing_[:, ii], linewidth=0.5, color='k')
@@ -402,12 +402,13 @@ def ica_pulse_reconstruction(signal,
         # Plot example reconstructions
         print('Example iEEG of stim pulses before/after IC removal...')
         rand_ix = np.random.permutation(len(feats_stim_recons))[:16]
-        plt.figure()
+        plt.figure(figsize=(6,6), dpi=300)
         for ii, ix in enumerate(rand_ix):
             ax = plt.subplot(4, 4, ii + 1)
             ax.plot(feats_stim[ix])
             ax.plot(feats_stim_recons[ix])
             ax.set_axis_off()
+        plt.show()
 
     # Reconstitute the signal
     print('Reconstitute full iEEG with cleaned pulse periods...')
