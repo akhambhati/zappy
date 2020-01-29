@@ -99,7 +99,7 @@ def train_ica(pulse_matr, n_components=None):
     """
 
     n_obs, n_feat = pulse_matr.shape
-    ica = FastICA(n_components=n_components, max_iter=200)
+    ica = FastICA(n_components=n_components, max_iter=1000, tol=1e-3)
     ica = ica.fit(pulse_matr)
 
     return ica
