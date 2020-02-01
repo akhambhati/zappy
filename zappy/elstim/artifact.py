@@ -99,7 +99,7 @@ def train_ica(pulse_matr, n_components=None):
     """
 
     n_obs, n_feat = pulse_matr.shape
-    ica = FastICA(n_components=n_components, max_iter=200)
+    ica = FastICA(n_components=n_components, max_iter=1000, tol=1e-3)
     ica = ica.fit(pulse_matr)
 
     return ica
@@ -248,14 +248,15 @@ def ica_pulse_reconstruction(signal,
                              padding,
                              amp_range=(0, 0.009),
                              n_components=None,
-                             krt_pct=[2.5, 97.5],
+                             ic_summary_stat_func=sp_stats.kurtosis,
+                             ic_stat_pct=[2.5, 97.5],
                              plot=True,
                              test_sham=False):
     """
     Reconstruct neural signa around individual stimulation pulses using
     ICA. This function runs ICA on the artifact signal, and compares
-    kurtosis of the uncovered sources to the kurtosis of sham signal
-    of equal duration as the artifact. Components with kurtosis values outside
+    the summary statistic of the uncovered sources to the summary statistic of sham signal
+    of equal duration as the artifact. Components with summary statistic values outside
     the range of the sham distribution are rejected from the artifact ICA model.
     The neural signal around the pulses is reconstructed from the remaining
     components of the artifact ICA model.
@@ -285,12 +286,18 @@ def ica_pulse_reconstruction(signal,
         If None, the components will be set to the maximum possible --
         likely the number of samples per clip.
 
-    krt_pct: list, shape: (2,)
-        Percentile range of the sham kurtosis distribution to use as a 
+    ic_summary_stat_func: stat function (default: scipy.stats.kurtosis)
+        A function handle for computing the summary statistic of the ICs from
+        stim epochs and sham epochs. Kurtosis works particularly well based on
+        offline testing, as it is able to identify the peakedness of the stim
+        artifact waveform.
+
+    ic_stat_pct: list, shape: (2,)
+        Percentile range of the sham summary stat distribution to use as a 
         threshold for determining artifactual components.
 
     plot: bool, Default is True
-        Generate diagnostic plots of the kurtosis distributions, ICA sources
+        Generate diagnostic plots of the summary stat distributions, ICA sources
         for the sham signal and for the artifactual signal, randomly drawn
         reconstructions around individual pulses.
 
@@ -359,15 +366,15 @@ def ica_pulse_reconstruction(signal,
     ica_stim = train_ica(feats_stim, n_components=n_components)
     ica_sham = train_ica(feats_sham, n_components=n_components)
 
-    print('Calculating kurtosis distribution of ICs...')
-    # Get Kurtosis of components (Stim)
-    krt_stim = sp_stats.kurtosis(ica_stim.mixing_, axis=0, fisher=True)
+    print('Calculating summary statistic on distribution of ICs...')
+    # Get summary stat of components (Stim)
+    krt_stim = ic_summary_stat_func(ica_stim.mixing_, axis=0)
     ica_stim.components_ = ica_stim.components_[np.argsort(krt_stim)[::-1], :]
     ica_stim.mixing_ = ica_stim.mixing_[:, np.argsort(krt_stim)[::-1]]
     krt_stim = krt_stim[np.argsort(krt_stim)[::-1]]
 
-    # Get Kurtosis of components (Sham)
-    krt_sham = sp_stats.kurtosis(ica_sham.mixing_, axis=0, fisher=True)
+    # Get summary stat of components (Sham)
+    krt_sham = ic_summary_stat_func(ica_sham.mixing_, axis=0)
     ica_sham.components_ = ica_sham.components_[np.argsort(krt_sham)[::-1], :]
     ica_sham.mixing_ = ica_sham.mixing_[:, np.argsort(krt_sham)[::-1]]
     krt_sham = krt_sham[np.argsort(krt_sham)[::-1]]
@@ -378,8 +385,8 @@ def ica_pulse_reconstruction(signal,
         feats_stim,
         ica_stim,
         rm_comp=np.flatnonzero(
-            (krt_stim < np.percentile(krt_sham, krt_pct[0]))
-            | (krt_stim > np.percentile(krt_sham, krt_pct[1]))))
+            (krt_stim < np.percentile(krt_sham, ic_stat_pct[0]))
+            | (krt_stim > np.percentile(krt_sham, ic_stat_pct[1]))))
 
     if plot:
         # Plot Components
@@ -388,14 +395,16 @@ def ica_pulse_reconstruction(signal,
         print('Independent Components of Non-Stim Pulses...')
         plot_ica(ica_sham, padding=padding)
 
-        # Plot IC Kurtosis
-        print('Distribution of Kurtosis values for IC removal...')
+        # Plot IC Summary Stat
+        print('Distribution of summary stat values for IC removal...')
         plt.figure(figsize=(6,6), dpi=300)
         ax = plt.subplot(111)
         ax.plot(krt_stim)
         ax.plot(krt_sham)
+        ax.hlines(np.percentile(krt_sham, ic_stat_pct),
+                  0, len(krt_stim), linestyle='--', color='r')
         ax.set_xlabel('Ranked ICs')
-        ax.set_ylabel('IC Kurtosis')
+        ax.set_ylabel('IC Summary Stat')
         ax.legend(['Stim Seq', 'Sham Seq'])
         plt.show()
 
