@@ -251,6 +251,7 @@ def ica_pulse_reconstruction(signal,
                              ic_summary_stat_func=sp_stats.kurtosis,
                              ic_stat_pct=[2.5, 97.5],
                              plot=True,
+                             signal_sham=None,
                              test_sham=False):
     """
     Reconstruct neural signa around individual stimulation pulses using
@@ -301,6 +302,9 @@ def ica_pulse_reconstruction(signal,
         for the sham signal and for the artifactual signal, randomly drawn
         reconstructions around individual pulses.
 
+    signal_sham: np.ndarray, shape: [n_sample x n_chan]
+        Recorded neural signal with stimulation pulse artifact.
+
     test_sham: bool, Default is False
         Add artifactual signal to the sham signal, and then attempt to
         reconstruct the corrupted sham signal. Intended for testing pipeline.
@@ -310,6 +314,10 @@ def ica_pulse_reconstruction(signal,
     recons_signal: np.ndarray, shape: [n_sample x n_chan]
         Neural signal with reconstructed data around the pulses.
     """
+
+    # Signal Sham as signal
+    if signal_sham is None:
+        signal_sham = signal.copy()
 
     # Aggregate all pulses across stim sequence
     pulse_stim_inds = []
@@ -337,7 +345,7 @@ def ica_pulse_reconstruction(signal,
     # Generate a set of sham indices using aggregate set of pulse indices
     print('Determining non-pulse periods to use as control...')
     pulse_sham_inds = gen_sham_inds(pulse_stim_inds, avoid_stim_inds,
-                                    signal.shape[0])
+                                    signal_sham.shape[0])
 
     # Clip the iEEG (Stim)
     print('Clipping and aggregating iEEG around stim pulses...')
@@ -349,7 +357,7 @@ def ica_pulse_reconstruction(signal,
     # Clip the iEEG (Sham)
     print('Clipping and aggregating iEEG around non-stim pulses...')
     feats_sham, pinds_sham_padded = clip_pulses_ieeg(
-        signal, pulse_sham_inds, padding=padding)
+        signal_sham, pulse_sham_inds, padding=padding)
     n_trial1, n_chan1, n_feat1 = feats_sham.shape
     feats_sham = feats_sham.reshape(n_trial1 * n_chan1, n_feat1)
 
