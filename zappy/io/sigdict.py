@@ -10,7 +10,7 @@ import numpy as np
 
 
 def load_data_dict(dd_path):
-        df = np.load(dd_path)
+        df = np.load(dd_path, allow_pickle=True)
         data_dict = {}
         for d in df:
             data_dict[d] = df[d][()]
