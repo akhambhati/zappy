@@ -449,8 +449,8 @@ def ica_pulse_reconstruction(signal,
             # the interpolation.
             #feat_zs = sp_stats.zscore(feats_stim_recons[ii, jj, :])
             #signal[inds[0]:inds[1], jj] = (feat_zs * 2*line_std) + line_mean
-            feat_zs = feats_stim_recons[ii, jj, :] - feats_stim_recons[ii, jj, :].mean()
-            signal[inds[0]:inds[1], jj] = feat_zs + line_mean
+            #feat_zs = feats_stim_recons[ii, jj, :] - feats_stim_recons[ii, jj, :].mean()
+            signal[inds[0]:inds[1], jj] = line_mean #feat_zs + line_mean
 
 
     return signal
