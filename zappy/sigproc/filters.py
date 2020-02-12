@@ -101,6 +101,50 @@ def remove_drift(signal, fs):
     return signal
 
 
+def remove_hfreq(signal, fs):
+    """
+    Apply a low-pass Butterworth filter to remove high-frequency content above 1000 Hz. Should
+    preserve frequencies <1000 Hz.
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_chan]
+        Signal recorded from multiple electrodes that are to be
+        notch filtered.
+
+    fs: float
+        Sampling frequency of the signal.
+
+    Returns
+    -------
+    signal: numpy.ndarray, shape: [n_sample x n_chan]
+        Signal with drift removed.
+    """
+
+    # Get a copy of the signal
+    signal = signal.copy()
+
+    # Get signal attributes
+    n_s, n_ch = signal.shape
+
+    # Get butterworth filter parameters
+    buttord_params = {'wp': 1000.0,            # Passband 1 Hz
+                      'ws': 1100.0,            # Stopband 0.5 Hz
+                      'gpass': 3,           # 3dB corner at pass band
+                      'gstop': 60,          # 60dB min. attenuation at stop band 
+                      'analog': False,      # Digital filter
+                      'fs': fs}
+    ford, wn = sig.buttord(**buttord_params)
+
+    # Design the filter using second-order sections to ensure better stability
+    sos = sig.butter(ford, wn, btype='lowpass', output='sos', fs=fs)
+
+    # Apply zero-phase forward/backward filter signal along the time axis
+    signal = sig.sosfiltfilt(sos, signal, axis=0)
+
+    return signal
+
+
 def notch_line(signal, fs, notch_freq=60.0, bw=2.0, harm=True):
     """
     Apply a Notch filter at a specified Notch frequency (and harmonics).
