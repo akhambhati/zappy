@@ -435,10 +435,10 @@ def ica_pulse_reconstruction(signal,
 
             # Grab the first/second-order stats of the signal around the
             # excised clip (half the padding on either side of the clip)
-            pre_mean = signal[(inds[0] - padding[0] // 2):inds[0], jj].mean()
-            post_mean = signal[inds[1]:(inds[1] + padding[0] // 2), jj].mean()
-            pre_std = signal[(inds[0] - padding[0] // 2):inds[0], jj].std()
-            post_std = signal[inds[1]:(inds[1] + padding[1] // 2), jj].std()
+            pre_mean = signal[(inds[0] - padding[0]):inds[0], jj].mean()
+            post_mean = signal[inds[1]:(inds[1] + padding[1]), jj].mean()
+            pre_std = signal[(inds[0] - padding[0]):inds[0], jj].std()
+            post_std = signal[inds[1]:(inds[1] + padding[1]), jj].std()
 
             # Linear interpolation of the mean and standard deviation across
             # the blank
@@ -447,7 +447,10 @@ def ica_pulse_reconstruction(signal,
 
             # Modulate the reconstructed component by the shift and scale of
             # the interpolation.
-            feat_zs = sp_stats.zscore(feats_stim_recons[ii, jj, :])
-            signal[inds[0]:inds[1], jj] = (feat_zs * line_std) + line_mean
+            #feat_zs = sp_stats.zscore(feats_stim_recons[ii, jj, :])
+            #signal[inds[0]:inds[1], jj] = (feat_zs * 2*line_std) + line_mean
+            feat_zs = feats_stim_recons[ii, jj, :] - feats_stim_recons[ii, jj, :].mean()
+            signal[inds[0]:inds[1], jj] = feat_zs + line_mean
+
 
     return signal
