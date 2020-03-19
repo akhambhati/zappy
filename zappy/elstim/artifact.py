@@ -429,30 +429,44 @@ def ica_pulse_reconstruction(signal,
 
     # Reconstitute the signal
     print('Reconstitute full iEEG with cleaned pulse periods...')
+    from scipy.interpolate import interp1d
     feats_stim_recons = feats_stim_recons.reshape(n_trial, n_chan, n_feat)
     for ii, inds in enumerate(pinds_stim_padded.T):
         for jj in range(signal.shape[1]):
 
             # Grab the first/second-order stats of the signal around the
             # excised clip (half the padding on either side of the clip)
-            pre_mean = signal[(inds[0] - padding[0]):inds[0], jj].mean()
-            post_mean = signal[inds[1]:(inds[1] + padding[1]), jj].mean()
-            pre_std = signal[(inds[0] - padding[0]):inds[0], jj].std()
-            post_std = signal[inds[1]:(inds[1] + padding[1]), jj].std()
+            pdng = inds[1]-inds[0]
+            pre_ix = np.arange(inds[0]-pdng, inds[0])
+            post_ix = np.arange(inds[1], inds[1] + pdng)
+            all_ix = np.concatenate((pre_ix, post_ix))
+
+            pre_sig = signal[pre_ix, jj]
+            post_sig = signal[post_ix, jj]
+            all_sig = signal[all_ix, jj]
+
+            pre_rng = (pre_sig - pre_sig.mean()).max() - (pre_sig - pre_sig.mean()).min()
+            post_rng = (post_sig - post_sig.mean()).max() - (post_sig - post_sig.mean()).min()
 
             # Linear interpolation of the mean and standard deviation across
             # the blank
-            line_mean = np.linspace(pre_mean, post_mean, inds[1] - inds[0])
-            line_std = np.linspace(pre_std, post_std, inds[1] - inds[0])
+            line_mean = interp1d(all_ix, all_sig)
+            line_rng = np.linspace(pre_rng, post_rng, pdng)
 
             # Modulate the reconstructed component by the shift and scale of
             # the interpolation.
-            #feat_zs = sp_stats.zscore(feats_stim_recons[ii, jj, :])
-            #signal[inds[0]:inds[1], jj] = (feat_zs * 2*line_std) + line_mean
             feat_zs = feats_stim_recons[ii, jj, :].copy()
+
+            # Detrend the reconsutrction
             slope, yint, _, _, _ = sp_stats.linregress(np.arange(len(feat_zs)), feat_zs)
             feat_zs = feat_zs - (slope*feat_zs + yint)
+
+            # Normalize the reconstruction
             feat_zs = feat_zs - feat_zs.mean()
-            signal[inds[0]:inds[1], jj] = feat_zs + line_mean
+            feat_zs = 2*((feat_zs - feat_zs.min()) / (feat_zs.max() - feat_zs.min())) - 1
+
+            # Rescale the reconstruction and add a trendline
+            signal[inds[0]:inds[1], jj] = (feat_zs*line_rng) + line_mean(np.arange(inds[0], inds[1]))
+
 
     return signal
