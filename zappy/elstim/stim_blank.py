@@ -150,6 +150,41 @@ def linterp_blank(signal, blank):
     return signal
 
 
+def revinterp_blank(signal, blank):
+    """Signal reversal interpolation over blanks"""
+
+    if not blank.any():
+        return signal
+
+    # Get the blank cutoffs
+    blnk_on = np.flatnonzero(np.diff(blank) > 0) + 1
+    blnk_off = np.flatnonzero(np.diff(blank) < 0) + 1
+
+    # Discard blanks that are trailing at the head or tail of the vector
+    if (blnk_off[0] < blnk_on[0]):
+        blnk_off = blnk_off[1:]
+
+    if (blnk_on[-1] > blnk_off[-1]):
+        blnk_on = blnk_on[:-1]
+
+    assert len(blnk_off) == len(blnk_on)
+
+    # Iterate over blanks and linearly interpolate
+    for on, off in zip(blnk_on, blnk_off):         
+        try:
+            dur = off-on
+            wt = np.linspace(0, 1, dur)
+            prev = signal[on-dur:on][::-1]
+            fwd = signal[off:off+dur][::-1]
+            signal[on:off] = prev*wt[::-1] + fwd*wt
+        except:
+            m, yint, _, _, _ = stats.linregress([on - 1, off + 1],
+                                                [signal[on - 1], signal[off + 1]])
+            signal[on:off] = m * np.arange(on, off) + yint
+
+    return signal
+
+
 def preproc_pipeline(data_dict,
                      ds_fac=15,
                      n_inter_pulse=[244],
