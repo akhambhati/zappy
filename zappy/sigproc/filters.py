@@ -52,7 +52,7 @@ def decimate(signal, fs_old, fs_new):
 
     # Apply decimation to the signal, along the time axis
     signal = sig.decimate(
-        signal, q=q, ftype='fir', zero_phase=True, axis=0)
+        signal, q=q, ftype='iir', zero_phase=True, axis=0)
 
     return signal, q
 
