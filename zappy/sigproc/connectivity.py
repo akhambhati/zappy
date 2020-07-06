@@ -40,13 +40,13 @@ def _tdot(X_cn, imag):
 
 def phase_locking_value(signal, cross_freq=False, coherence=False, imag=False):
     """
-    Convolve wavelet family with iEEG signal.
+    Compute inter-electrode phase coherence of the iEEG signal.
 
     Parameters
     ----------
     signal: numpy.ndarray, shape: [n_sample x n_freqs x n_chan]
-        Signal recorded from multiple electrodes that are to be
-        notch filtered.
+        Multi-electrode iEEG Signal that has been transformed to the
+        complex-domain (via. Hilbert or Wavelet).
 
     cross_freq: bool
         Whether to retain the cross-frequency interactions, also known as
@@ -61,7 +61,8 @@ def phase_locking_value(signal, cross_freq=False, coherence=False, imag=False):
     imag: bool
         Whether to only utilize the imaginary component of the complex-valued
         signal. Akin to calculating the imaginary phase-locking or
-        imaginary coherence.
+        imaginary coherence. Setting this to true may help mitigate issues
+        associated with volume conduction bias on connectivity estimates.
         Default is False.
 
     Returns
@@ -105,13 +106,14 @@ def phase_locking_value(signal, cross_freq=False, coherence=False, imag=False):
 
 def amplitude_correlation(signal, cross_freq=False):
     """
-    Convolve wavelet family with iEEG signal.
+    Compute inter-electrode amplitude correlation of the iEEG signal.
 
     Parameters
     ----------
     signal: numpy.ndarray, shape: [n_sample x n_freqs x n_chan]
-        Signal recorded from multiple electrodes that are to be
-        notch filtered.
+        Multi-electrode iEEG Signal that has been transformed to the
+        complex-domain (via. Hilbert or Wavelet), or transformed to the
+        real-valued analytic signal.
 
     cross_freq: bool
         Whether to retain the cross-frequency interactions, also known as
