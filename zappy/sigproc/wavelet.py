@@ -88,6 +88,9 @@ def convolve_family(signal, family, mem_fft=True, interp_nan=True, resample_fac=
     -------
     signal: numpy.ndarray (Complex), shape: [n_downsample x n_freqs x n_chan]
         Complex-valued, wavelet-transformed signal.
+
+    Fs_rs: float
+        Sampling frequency of the convolved signal.
     """
 
     n_s, n_c = signal.shape
@@ -103,15 +106,16 @@ def convolve_family(signal, family, mem_fft=True, interp_nan=True, resample_fac=
             n_kernel=n_k)
 
     # Determine the resampling frequency
+    Fs = 1 / np.mean(np.diff(family['sample']['time']))
     if resample_fac is not None:
         Fs_rs = int(resample_fac * 
             np.max(family['wavelet']['freqs'] / family['wavelet']['cycles']))
-        Fs = 1 / np.mean(np.diff(family['sample']['time']))
         rs_fac = int(Fs / Fs_rs)
         n_s_ds = int(np.ceil(n_s / rs_fac))
     else:
         rs_fac = 1
         n_s_ds = n_s
+    Fs_rs = Fs / rs_fsc
 
 
     # Setup signal
@@ -130,4 +134,4 @@ def convolve_family(signal, family, mem_fft=True, interp_nan=True, resample_fac=
 
         wv_signal[:, :, ch_ii] = out[::rs_fac, :, :][:, :, 0]
 
-    return wv_signal
+    return wv_signal, Fs_rs
