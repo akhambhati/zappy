@@ -59,7 +59,7 @@ def gen_morlet_family(Fs, FQ_LOW=3, FQ_HIGH=150, FQ_N=50, CYC_N=6, logspace=True
     return family
 
 
-def convolve_family(signal, family, mem_fft=True, interp_nan=True):
+def convolve_family(signal, family, mem_fft=True, interp_nan=True, resample_fac=None):
     """
     Convolve wavelet family with iEEG signal.
 
@@ -77,9 +77,16 @@ def convolve_family(signal, family, mem_fft=True, interp_nan=True):
     interp_nan: bool
         Interpolate NaNs in the signal. Default is True.
 
+    resample_fac: int
+        Resample the convolved signal based on the time-length of the
+        fastest wavelet in the wavelet family. Specifically, the new sampling
+        frequency will be:
+        resample_fac*max(wavelet_frequency / wavelet_cycles)
+        Default is None, meaning no resampling is performed
+
     Returns
     -------
-    signal: numpy.ndarray (Complex), shape: [n_sample x n_freqs x n_chan]
+    signal: numpy.ndarray (Complex), shape: [n_downsample x n_freqs x n_chan]
         Complex-valued, wavelet-transformed signal.
     """
 
@@ -95,8 +102,20 @@ def convolve_family(signal, family, mem_fft=True, interp_nan=True):
             signal_len=n_s,
             n_kernel=n_k)
 
+    # Determine the resampling frequency
+    if resample_fac is not None:
+        Fs_rs = int(resample_fac * 
+            np.max(family['wavelet']['freqs'] / family['wavelet']['cycles']))
+        Fs = 1 / np.mean(np.diff(family['sample']['time']))
+        rs_fac = int(Fs / Fs_rs)
+        n_s_ds = int(np.ceil(n_s / rs_fac))
+    else:
+        rs_fac = 1
+        n_s_ds = n_s
+
+
     # Setup signal
-    wv_signal = np.zeros((n_s, n_k, n_c),
+    wv_signal = np.zeros((n_s_ds, n_k, n_c),
                          dtype=np.complex)
 
     # Iterate over each channel and convolve
@@ -109,6 +128,6 @@ def convolve_family(signal, family, mem_fft=True, interp_nan=True):
                 signal[:, ch_ii].reshape(-1, 1),
                 fft=fft, ifft=ifft, interp_nan=interp_nan)
 
-        wv_signal[:, :, ch_ii] = out[:, :, :][:, :, 0]
+        wv_signal[:, :, ch_ii] = out[::rs_fac, :, :][:, :, 0]
 
     return wv_signal
