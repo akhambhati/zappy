@@ -115,7 +115,7 @@ def convolve_family(signal, family, mem_fft=True, interp_nan=True, resample_fac=
     else:
         rs_fac = 1
         n_s_ds = n_s
-    Fs_rs = Fs / rs_fsc
+    Fs_rs = Fs / rs_fac
 
 
     # Setup signal
