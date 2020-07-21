@@ -30,10 +30,10 @@ def _tdot(X_cn, imag):
     # Compute the tensordot
     if imag:
         X_tdot = np.abs(
-            np.tensordot(X_cn, np.conj(X_cn), axes=((0), (0))).imag / n_ts)
+            np.tensordot(X_cn, np.conj(X_cn), axes=((0), (0))).imag) / n_ts
     else:
         X_tdot = np.abs(
-            np.tensordot(X_cn, np.conj(X_cn), axes=((0), (0))) / n_ts)
+            np.tensordot(X_cn, np.conj(X_cn), axes=((0), (0)))) / n_ts
 
     return X_tdot
 
@@ -93,6 +93,7 @@ def phase_locking_value(signal, cross_freq=False, coherence=False, imag=False):
             np.expand_dims(np.abs(X_a**2).sum(axis=0), axis=0),
             np.expand_dims(np.abs(X_a**2).sum(axis=0), axis=0),
             axes=((0), (0))))
+        X_plv *= n_ts
 
     # Re-arrange tensordot axes
     X_plv = np.transpose(X_plv, (0, 2, 1, 3))
