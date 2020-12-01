@@ -552,6 +552,62 @@ def clip_artifact_candidates(signal, stim_seq, padding, amp_range):
     return feats_stim, pulse_stim_inds
 
 
+def normalize_artifact_candidates(feats_stim, robust=False):
+    """
+    Use z-score to normalize candidates.
+
+    Parameters
+    -------
+    feats_stim: np.ndarray, shape: [n_sample x n_chan x n_candidates]
+        Clipped artifact candidates from the original signal.
+
+    robust: bool, default: False
+        Set to True to use robust z-score based on medians.
+
+    Returns
+    -------
+    feats_stim_z: np.ndarray, shape: [n_sample x n_chan x n_candidates]
+        Clipped artifact candidates from the original signal after normalization
+        using a robust z-score.
+    """
+
+    # Compute the robust z-Score
+    if robust:
+        return (feats_stim - np.median(feats_stim, axis=0)) / \
+            sp_stats.median_abs_deviation(feats_stim, axis=0)
+    else:
+        return sp_stats.zscore(feats_stim, axis=0)
+
+
+def filter_artifact_candidates(feats_stim_z, z_threshold): 
+    """
+    Identify artifact candidates with large voltage deflections, termed "outliers".
+
+    Parameters
+    -------
+    feats_stim_z: np.ndarray, shape: [n_sample x n_chan x n_candidates]
+        Clipped and robust z-score normalized artifact candidates clips.
+
+    z_threshold: float
+        Threshold for determining whether a candidate contains outlier voltage
+        deflections.
+
+    Returns
+    -------
+    filter_candidates: list[list[int]], shape: [n_chan] -> [n_valid]
+        Nested list of channels containing a list of valid candidate pulses.
+    """
+
+    # Iterate over channels
+    n_sample, n_chan, n_cand = feats_stim_z.shape
+    filter_candidates = []
+    for ch in range(n_chan):
+        thr_ix = np.flatnonzero((np.abs(feats_stim_z[:,0,:]) >= z_threshold).any(axis=0))
+        filter_candidates.append(thr_ix)
+
+    return filter_candidates
+
+
 def hdbscan_subtraction(signal,
                         stim_seq,
                         padding,
