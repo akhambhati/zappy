@@ -12,6 +12,7 @@ import scipy.signal as sp_sig
 import scipy.stats as sp_stats
 from sklearn.decomposition import FastICA
 from hdbscan import HDBSCAN
+from scipy.spatial import procrustes
 
 from zappy.elstim.waveform import locate_pulses, parse_stim_seq_to_trains
 
@@ -494,14 +495,72 @@ def ica_pulse_reconstruction(signal,
     return signal
 
 
+
+def clip_artifact_candidates(signal, stim_seq, padding, amp_range):
+    """
+    Clip the window around potential stimulation artifact, termed
+    "candidates" -- some stimulation pulses do not yield signal amplitude changes
+    that exceed background variation. Returns a tensor of the candidates
+    and their position within the original signal.
+
+    Parameters
+    ----------
+    signal: np.ndarray, shape: [n_sample x n_chan]
+        Recorded neural signal with stimulation pulse artifact.
+
+    stim_seq: np.ndarray, shape: [n_sample x n_stim_chan]
+        Stimulation pulse sequences over multiple electrodes.
+
+    padding: list, shape: (2,);
+        Number of samples to pad behind and ahead of isolated stim pulses.
+        Increased padding helps better resolve artifact from the non-artifact
+        background signal. Increasing padding too high will cause bleeding over
+        to adjacent pulses in a continuous stim train.
+
+    amp_range: tuple, shape: (float, float), default is (0, 0.009)
+        The range of amplitudes (in amperes) within which to search for pulses.
+
+    Returns
+    -------
+    feats_stim: np.ndarray, shape: [n_sample x n_chan x n_candidates]
+        Clipped artifact candidates from the original signal.
+
+    pulse_stim_inds: np.ndarray, shape: [2 x n_candidates]
+        Onset and offset index of the candidate clips within the input signal.
+    """
+
+    # Aggregate all pulses across stim sequence
+    print('Locating stimulation pulses from input sequence...')
+    pulse_stim_inds = []
+    for si in range(stim_seq.shape[1]):
+        pinds, cinds = locate_pulses(stim_seq[:, si], amp_range=amp_range)
+
+        # Add all pulses to aggregate list
+        for pp in pinds.T:
+            pulse_stim_inds.append(pp)
+    pulse_stim_inds = np.array(pulse_stim_inds).T
+
+    # Pad the pulses
+    pulse_stim_inds = pad_pulses(pulse_stim_inds, padding=padding)
+
+    # Clip the iEEG (Stim)
+    print('Clipping and aggregating iEEG around stim pulses...')
+    feats_stim, _ = clip_pulses_ieeg(
+            signal, pulse_stim_inds)
+    feats_stim = feats_stim.transpose((2,1,0))
+
+    return feats_stim, pulse_stim_inds
+
+
 def hdbscan_subtraction(signal,
                         stim_seq,
                         padding,
                         random_samples=None,
-                        baseline_samples=3,
+                        feat_window=None,
                         amp_range=(0, 0.009),
                         n_components=None,
-                        hdbscan_min_cluster_size=None,
+                        hdbscan_min_cluster_size=3,
+                        hdbscan_min_samples=2,
                         hdbscan_nproc=1):
     """
     Reconstruct neural signal around individual stimulation pulses using
@@ -592,141 +651,67 @@ def hdbscan_subtraction(signal,
     feats_stim, _ = clip_pulses_ieeg(
             signal, rnd_pulse_stim_inds)
     n_trial, n_chan, n_feat = feats_stim.shape
-    feats_baseline = feats_stim[:, :, :baseline_samples].mean(axis=2)
-    feats_norm = (feats_stim.T - feats_baseline.T).T
-    feats_norm = feats_norm.reshape(n_trial * n_chan, n_feat)
+    feats_norm = feats_stim.reshape(n_trial * n_chan, n_feat)
+    feats_norm = (feats_norm.T - np.median(feats_norm, axis=1)).T
+    return feats_norm
+
+    # Create a training set of features by clipping the midpoint of the
+    # biphasic pulse
+    feats_train = np.zeros((feats_norm.shape[0], np.sum(feat_window)))
+    print(feats_train.shape)
+    #midpt = np.argmax(np.abs(np.diff(feats_norm, axis=1)), axis=1)
+    midpt = np.argmax(feats_norm, axis=1)
+    for ii in range(feats_norm.shape[0]):
+        print(midpt[ii])
+        feats_train[ii, :] = \
+            feats_norm[ii, (midpt[ii]-feat_window[0]):(midpt[ii]+feat_window[1])]
+
+    # Parameterize stim artifact within the provided feature window
+    feats_train2 = np.array([
+        np.max(feats_train, axis=1),
+        np.min(feats_train, axis=1),
+        np.argmax(feats_train, axis=1),
+        np.argmin(feats_train, axis=1)]).T
+
 
     # Train an HDBSCAN model
     print('Training HDBSCAN model of stim pulse artifacts...')
-    if hdbscan_min_cluster_size is None:
-        hdbscan_min_cluster_size = int(feats_norm.shape[0]**(0.5))
     hdbcl = HDBSCAN(min_cluster_size=hdbscan_min_cluster_size,
+            min_samples=hdbscan_min_samples,
             gen_min_span_tree=True,
             core_dist_n_jobs=hdbscan_nproc,
+            metric='euclidean',
             allow_single_cluster=True)
-    hdbcl.fit(feats_norm)
+    hdbcl.fit(feats_train2)
 
     # Get Cluster Means
-    feats_clust = np.array([feats_norm[hdbcl.labels_ == lbl, :].mean(axis=0)
+    feats_clust = np.array([np.mean(feats_norm[hdbcl.labels_ == lbl, :], axis=0)
+                            for lbl in np.unique(hdbcl.labels_)])
+    feats_clust_short = np.array([np.mean(feats_train[hdbcl.labels_ == lbl, :], axis=0)
                             for lbl in np.unique(hdbcl.labels_)])
     print('Calculated {} Artifact Templates'.format(feats_clust.shape[0]))
-    
+
     # Clip all iEEG pulses
     feats_all, mod_pulse_stim_inds = clip_pulses_ieeg(signal, pulse_stim_inds)
 
     # Match pulses with cluster templates, rescale, and remove
     print('Matching and removing artifacts')
     feats_fix = feats_all.copy()
+    feats_assign = np.zeros_like(feats_all)
     for iy in range(feats_all.shape[1]):
         print(iy)
         for ix in range(feats_all.shape[0]):
-            cl_ix = np.argmax(np.corrcoef(feats_all[ix, iy], feats_clust)[0, 1:])
-            sel_feat = feats_clust[cl_ix].copy()
-            ratio = ((feats_all[ix, iy].max() - feats_all[ix, iy].min()) / 
-                     (sel_feat.max() - sel_feat.min()))
-            feats_fix[ix, iy] = feats_all[ix, iy] - ratio*sel_feat
+            sel_feats = feats_all[ix, iy]
+            sel_feats = sel_feats - np.nanmean(sel_feats)
+            sel_feats_short = sel_feats[(midpt[ii]-feat_window[0]):(midpt[ii]+feat_window[1])]
 
-    return feats_clust, feats_all, feats_fix
+            cl_ix = np.argmax(np.corrcoef(sel_feats_short, feats_clust_short)[0, 1:])
+            sel_clust = feats_clust[cl_ix]
 
-    # Train ICA model
-    print('Training ICA models on stim pulses and non-stim pulses...')
-    ica_stim = train_ica(feats_stim, n_components=n_components)
-    ica_sham = train_ica(feats_sham, n_components=n_components)
+            ratio = ((sel_feats.max() - sel_feats.min()) /
+                     (sel_clust.max() - sel_clust.min()))
+            feats_assign[ix, iy] = ratio*sel_clust
+            feats_fix[ix, iy] = sel_feats - feats_assign[ix, iy]
+            signal[pulse_stim_inds[0,ix]:pulse_stim_inds[1,ix], iy] = feats_fix[ix, iy]
 
-    print('Calculating summary statistic on distribution of ICs...')
-    # Get summary stat of components (Stim)
-    krt_stim = ic_summary_stat_func(ica_stim.mixing_, axis=0)
-    ica_stim.components_ = ica_stim.components_[np.argsort(krt_stim)[::-1], :]
-    ica_stim.mixing_ = ica_stim.mixing_[:, np.argsort(krt_stim)[::-1]]
-    krt_stim = krt_stim[np.argsort(krt_stim)[::-1]]
-
-    # Get summary stat of components (Sham)
-    krt_sham = ic_summary_stat_func(ica_sham.mixing_, axis=0)
-    ica_sham.components_ = ica_sham.components_[np.argsort(krt_sham)[::-1], :]
-    ica_sham.mixing_ = ica_sham.mixing_[:, np.argsort(krt_sham)[::-1]]
-    krt_sham = krt_sham[np.argsort(krt_sham)[::-1]]
-
-    # Reconstruct components
-    print('Reconstructing iEEG of stim pulses after removing corrupt components...')
-    feats_stim_recons = reconstruct_ica(
-        feats_stim,
-        ica_stim,
-        rm_comp=np.flatnonzero(
-            (krt_stim < np.percentile(krt_sham, ic_stat_pct[0]))
-            | (krt_stim > np.percentile(krt_sham, ic_stat_pct[1]))))
-
-    if plot:
-        # Plot Components
-        print('Independent Components of Stim Pulses...')
-        plot_ica(ica_stim, padding=padding)
-        print('Independent Components of Non-Stim Pulses...')
-        plot_ica(ica_sham, padding=padding)
-
-        # Plot IC Summary Stat
-        print('Distribution of summary stat values for IC removal...')
-        plt.figure(figsize=(6,6), dpi=300)
-        ax = plt.subplot(111)
-        ax.plot(krt_stim)
-        ax.plot(krt_sham)
-        ax.hlines(np.percentile(krt_sham, ic_stat_pct),
-                  0, len(krt_stim), linestyle='--', color='r')
-        ax.set_xlabel('Ranked ICs')
-        ax.set_ylabel('IC Summary Stat')
-        ax.legend(['Stim Seq', 'Sham Seq'])
-        plt.show()
-
-        # Plot example reconstructions
-        print('Example iEEG of stim pulses before/after IC removal...')
-        rand_ix = np.random.permutation(len(feats_stim_recons))[:16]
-        plt.figure(figsize=(6,6), dpi=300)
-        for ii, ix in enumerate(rand_ix):
-            ax = plt.subplot(4, 4, ii + 1)
-            ax.plot(feats_stim[ix])
-            ax.plot(feats_stim_recons[ix])
-            ax.set_axis_off()
-        plt.show()
-
-    # Reconstitute the signal
-    print('Reconstitute full iEEG with cleaned pulse periods...')
-    from scipy.interpolate import interp1d
-    feats_stim_recons = feats_stim_recons.reshape(n_trial, n_chan, n_feat)
-    for ii, inds in enumerate(pinds_stim_padded.T):
-        for jj in range(signal.shape[1]):
-
-            # Grab the first/second-order stats of the signal around the
-            # excised clip (half the padding on either side of the clip)
-            pdng = inds[1]-inds[0]
-            pre_ix = np.arange(inds[0]-pdng, inds[0])
-            post_ix = np.arange(inds[1], inds[1] + pdng)
-            all_ix = np.concatenate((pre_ix, post_ix))
-
-            pre_sig = signal[pre_ix, jj]
-            post_sig = signal[post_ix, jj]
-            all_sig = signal[all_ix, jj]
-
-            pre_rng = (pre_sig - pre_sig.mean()).max() - (pre_sig - pre_sig.mean()).min()
-            post_rng = (post_sig - post_sig.mean()).max() - (post_sig - post_sig.mean()).min()
-
-            # Linear interpolation of the mean and standard deviation across
-            # the blank
-            line_mean = interp1d(all_ix, all_sig)
-            line_rng = np.linspace(pre_rng, post_rng, pdng)
-
-            # Modulate the reconstructed component by the shift and scale of
-            # the interpolation.
-            feat_zs = feats_stim_recons[ii, jj, :].copy()
-
-            # Detrend the reconsutrction
-            slope, yint, _, _, _ = sp_stats.linregress(np.arange(len(feat_zs)), feat_zs)
-            feat_zs = feat_zs - (slope*feat_zs + yint)
-
-            # Normalize the reconstruction
-            feat_zs = feat_zs - feat_zs.mean()
-            feat_zs = 2*((feat_zs - feat_zs.min()) / (feat_zs.max() - feat_zs.min())) - 1
-
-            # Rescale the reconstruction and add a trendline
-            signal[inds[0]:inds[1], jj] = (feat_zs*line_rng) + line_mean(np.arange(inds[0], inds[1]))
-
-
-    return signal
-
+    return signal, feats_clust_short, feats_assign, feats_all, feats_fix, feats_train
