@@ -12,7 +12,6 @@ import scipy.signal as sp_sig
 import scipy.stats as sp_stats
 from sklearn.decomposition import FastICA
 from hdbscan import HDBSCAN
-from scipy.spatial import procrustes
 
 from zappy.elstim.waveform import locate_pulses, parse_stim_seq_to_trains
 
@@ -495,7 +494,6 @@ def ica_pulse_reconstruction(signal,
     return signal
 
 
-
 def clip_artifact_candidates(signal, stim_seq, padding, amp_range):
     """
     Clip the window around potential stimulation artifact, termed
@@ -608,127 +606,117 @@ def filter_artifact_candidates(feats_stim_z, z_threshold):
     return filter_candidates
 
 
-def hdbscan_subtraction(signal,
-                        stim_seq,
-                        padding,
-                        random_samples=None,
-                        feat_window=None,
-                        amp_range=(0, 0.009),
-                        n_components=None,
-                        hdbscan_min_cluster_size=3,
-                        hdbscan_min_samples=2,
-                        hdbscan_nproc=1):
+def hdbscan_template(
+        artifact_candidates,
+        valid_candidates,
+        fwin,
+        align_type='slope',
+        align_tol=3,
+        scale_type='procrustes',
+        hdbscan_min_cluster_size=3,
+        hdbscan_min_samples=2,
+        hdbscan_nproc=1):
     """
-    Reconstruct neural signal around individual stimulation pulses using
-    ICA. This function runs ICA on the artifact signal, and compares
-    the summary statistic of the uncovered sources to the summary statistic of sham signal
-    of equal duration as the artifact. Components with summary statistic values outside
-    the range of the sham distribution are rejected from the artifact ICA model.
-    The neural signal around the pulses is reconstructed from the remaining
-    components of the artifact ICA model.
+    Unsupervised clustering of the candidate templates using hdbscan.
+    This function first aligns all the candidate artifacts, extracts
+    a window around the alignment center, trains an hdbscan model to learn
+    artifact templates, then matches each candidate to the template dictionary.
 
     Parameters
     ----------
-    signal: np.ndarray, shape: [n_sample x n_chan]
-        Recorded neural signal with stimulation pulse artifact.
+    artifact_candidates: np.ndarray, shape: [n_sample x n_candidates]
+        Clipped artifact candidates from the original signal for a single channel
+        (from clip_artifact_candidates).
 
-    stim_seq: np.ndarray, shape: [n_sample x n_stim_chan]
-        Stimulation pulse sequences over multiple electrodes.
+    filter_candidates: list[int], shape: [n_valid]
+        List of valid candidate pulses for a single channel
+        (from filter_artifact_candidates).
 
-    inter_train_len: int
-        Minimum number of samples that separates one stim train from the next.
+    fwin: list, shape: (2,);
+        Narrowest window about the alignment point that captures the most
+        informative features about the artifact.
 
-    padding: list, shape: (2,);
-        Number of samples to pad behind and ahead of isolated stim pulses.
-        Increased padding helps better resolve artifact from the non-artifact
-        background signal. Increasing padding too high will cause bleeding over
-        to adjacent pulses in a continuous stim train.
+    align_type: {'slope', 'peak'}, default: slope
+        Align each pulse based on the maximum change of the signal or based on
+        where the peak occurs.
 
-    amp_range: tuple, shape: (float, float), default is (0, 0.009)
-        The range of amplitudes (in amperes) within which to search for pulses.
+    align_tol: int
+        Most pulses should have a similar alignment, artifact candidates
+        with alignment points outside a tolerance window of
+        [-align_tol, +align_tol] will be discarded from training the model.
 
-    n_components: int, default is None
-        Number of ICA components to extract from the pulse matrix. 
-        If None, the components will be set to the maximum possible --
-        likely the number of samples per clip.
+    scale_type: {'procrustes', 'ratio'}, defaut: procrustes
+        Match the artifact templates to the artifact candidates using a 
+        procrustes fit or by rescaling based on the max/min ratio.
 
-    ic_summary_stat_func: stat function (default: scipy.stats.kurtosis)
-        A function handle for computing the summary statistic of the ICs from
-        stim epochs and sham epochs. Kurtosis works particularly well based on
-        offline testing, as it is able to identify the peakedness of the stim
-        artifact waveform.
-
-    ic_stat_pct: list, shape: (2,)
-        Percentile range of the sham summary stat distribution to use as a 
-        threshold for determining artifactual components.
-
-    plot: bool, Default is True
-        Generate diagnostic plots of the summary stat distributions, ICA sources
-        for the sham signal and for the artifactual signal, randomly drawn
-        reconstructions around individual pulses.
-
-    signal_sham: np.ndarray, shape: [n_sample x n_chan]
-        Recorded neural signal with stimulation pulse artifact.
-
-    test_sham: bool, Default is False
-        Add artifactual signal to the sham signal, and then attempt to
-        reconstruct the corrupted sham signal. Intended for testing pipeline.
 
     Returns
     -------
-    recons_signal: np.ndarray, shape: [n_sample x n_chan]
-        Neural signal with reconstructed data around the pulses.
+    template_similarity: np.ndarray, shape: [n_candidates]
+        The correlational similarity between an artifact candidate and the best
+        matching template.
+
+    template_assign: np.ndarray, shape: [n_candidates]
+        Assignment of artifact candidates into template groups based on
+        correlational similarity.
+
+    template_scaled: np.ndarray, shape: [n_sample x n_candidates]
+        Artifact templates rescaled to fit the candidate artifact. 
     """
 
-    # Aggregate all pulses across stim sequence
-    print('Locating stimulation pulses from input sequence...')
-    pulse_stim_inds = []
-    for si in range(stim_seq.shape[1]):
-        pinds, cinds = locate_pulses(stim_seq[:, si], amp_range=amp_range)
+    # Get the dataset size
+    n_sample, n_candidate = artifact_candidates.shape
 
-        # Add all pulses to aggregate list
-        for pp in pinds.T:
-            pulse_stim_inds.append(pp)
-    pulse_stim_inds = np.array(pulse_stim_inds).T
+    # Normalize the artifact candidates
+    artifact_candidates_z = normalize_artifact_candidates(
+         artifact_candidates, robust=False)
 
-    # Pad the pulses
-    pulse_stim_inds = pad_pulses(pulse_stim_inds, padding=padding)
+    ### TODO: Handle this condition
+    if len(valid_candidates) == 0:
+        valid_candidates = [*range(n_candidate)]
+    valid_candidates = np.array(valid_candidates)
 
-    # Randomly sample the pulse indices
-    if random_samples is None:
-        rnd_pulse_stim_inds = pulse_stim_inds.copy()
+    # Align all the artifacts according to alignment criteria
+    if align_type == 'slope':
+        midpt = np.argmax(np.abs(np.diff(artifact_candidates_z, axis=0)), axis=0)
+    elif align_type == 'peak':
+        midpt = np.argmax(np.abs(artifact_candidates_z), axis=0)
     else:
-        n_pulse = pulse_stim_inds.shape[1]
-        rnd_pulse_stim_inds = pulse_stim_inds[:,
-            np.random.permutation(n_pulse)[:random_samples]]
+        raise NotImplemented('Alignment type does not exist.')
 
-    # Clip the iEEG (Stim)
-    print('Clipping and aggregating iEEG around stim pulses...')
-    feats_stim, _ = clip_pulses_ieeg(
-            signal, rnd_pulse_stim_inds)
-    n_trial, n_chan, n_feat = feats_stim.shape
-    feats_norm = feats_stim.reshape(n_trial * n_chan, n_feat)
-    feats_norm = (feats_norm.T - np.median(feats_norm, axis=1)).T
-    return feats_norm
+    # Discard samples outside of the alignment tolerance
+    midpt = midpt[valid_candidates]
+    if align_tol is not None:
+        midpt_inds, midpt_cnts = np.unique(midpt, return_counts=True)
+        midpt_mode = midpt_inds[np.argmax(midpt_cnts)]
+        valid_midpt_ix = np.flatnonzero((midpt >= (midpt_mode - align_tol)) &
+                                        (midpt <= (midpt_mode + align_tol)))
+        midpt = midpt[valid_midpt_ix]
+        valid_candidates = valid_candidates[valid_midpt_ix]
+
+    # Discard samples outside the fwin criteria
+    valid_midpt_ix = np.flatnonzero(((midpt-fwin[0]) >= 0) &
+                                    ((midpt+fwin[1]) <= n_sample))
+    midpt = midpt[valid_midpt_ix]
+    valid_candidates = valid_candidates[valid_midpt_ix]
+
+    # Get the valid z-scored artifacts
+    artifact_candidates_z_valid = artifact_candidates_z[:, valid_candidates]
+    n_valid = len(valid_candidates)
+
+    if n_valid == 0:
+        template_similarity = np.zeros(n_candidate)
+        template_assign = np.zeros(n_candidate)
+        template_scaled = np.zeros((n_sample, n_candidate))
+        return template_similarity, template_assign, template_scaled
 
     # Create a training set of features by clipping the midpoint of the
     # biphasic pulse
-    feats_train = np.zeros((feats_norm.shape[0], np.sum(feat_window)))
-    print(feats_train.shape)
-    #midpt = np.argmax(np.abs(np.diff(feats_norm, axis=1)), axis=1)
-    midpt = np.argmax(feats_norm, axis=1)
-    for ii in range(feats_norm.shape[0]):
-        print(midpt[ii])
-        feats_train[ii, :] = \
-            feats_norm[ii, (midpt[ii]-feat_window[0]):(midpt[ii]+feat_window[1])]
-
-    # Parameterize stim artifact within the provided feature window
-    feats_train2 = np.array([
-        np.max(feats_train, axis=1),
-        np.min(feats_train, axis=1),
-        np.argmax(feats_train, axis=1),
-        np.argmin(feats_train, axis=1)]).T
-
+    artifact_train = np.zeros((n_valid, np.sum(fwin)))
+    for ii in range(n_valid):
+        artifact_train[ii, :] = \
+            artifact_candidates_z_valid[
+                    (midpt[ii]-fwin[0]):(midpt[ii]+fwin[1]), ii]
 
     # Train an HDBSCAN model
     print('Training HDBSCAN model of stim pulse artifacts...')
@@ -736,38 +724,239 @@ def hdbscan_subtraction(signal,
             min_samples=hdbscan_min_samples,
             gen_min_span_tree=True,
             core_dist_n_jobs=hdbscan_nproc,
-            metric='euclidean',
+            metric='correlation',
             allow_single_cluster=True)
-    hdbcl.fit(feats_train2)
+    hdbcl.fit(artifact_train)
 
     # Get Cluster Means
-    feats_clust = np.array([np.mean(feats_norm[hdbcl.labels_ == lbl, :], axis=0)
-                            for lbl in np.unique(hdbcl.labels_)])
-    feats_clust_short = np.array([np.mean(feats_train[hdbcl.labels_ == lbl, :], axis=0)
-                            for lbl in np.unique(hdbcl.labels_)])
-    print('Calculated {} Artifact Templates'.format(feats_clust.shape[0]))
+    clust_train = np.array([np.mean(
+        artifact_train.T[:, hdbcl.labels_ == lbl], axis=1)
+        for lbl in np.unique(hdbcl.labels_)])
 
-    # Clip all iEEG pulses
-    feats_all, mod_pulse_stim_inds = clip_pulses_ieeg(signal, pulse_stim_inds)
+    clust_all = np.array([np.mean(
+        artifact_candidates_z_valid[:, hdbcl.labels_ == lbl], axis=1)
+        for lbl in np.unique(hdbcl.labels_)])
+    print('Calculated {} Artifact Templates'.format(len(np.unique(hdbcl.labels_))))
 
     # Match pulses with cluster templates, rescale, and remove
-    print('Matching and removing artifacts')
-    feats_fix = feats_all.copy()
-    feats_assign = np.zeros_like(feats_all)
-    for iy in range(feats_all.shape[1]):
-        print(iy)
-        for ix in range(feats_all.shape[0]):
-            sel_feats = feats_all[ix, iy]
-            sel_feats = sel_feats - np.nanmean(sel_feats)
-            sel_feats_short = sel_feats[(midpt[ii]-feat_window[0]):(midpt[ii]+feat_window[1])]
+    print('Matching artifact candidates with learned templates...')
+    template_similarity = np.zeros(n_candidate)
+    template_assign = np.zeros(n_candidate)
+    template_scaled = np.zeros((n_sample, n_candidate))
+    for ii in range(n_candidate):
+        sel_cand = artifact_candidates[:, [ii]].copy()
 
-            cl_ix = np.argmax(np.corrcoef(sel_feats_short, feats_clust_short)[0, 1:])
-            sel_clust = feats_clust[cl_ix]
+        if scale_type == 'procrustes':
+            err_fit = []
+            clust_all_rescaled = []
+            for tt in clust_all:
+                p_res = procrustes(sel_cand.reshape(-1,1), tt.reshape(-1,1))
+                err_fit.append(p_res[0])
+                clust_all_rescaled.append(p_res[1])
+            cl_ix = np.argmin(err_fit)
+            sel_clust = clust_all_rescaled[cl_ix].flatten()
 
-            ratio = ((sel_feats.max() - sel_feats.min()) /
+        elif scale_type == 'ratio':
+            # Match using correlational similarity
+            corrs = np.corrcoef(sel_cand.T, clust_all)[0, 1:]
+            cl_ix = np.argmax(corrs)
+            sel_clust = clust_all[cl_ix].copy()
+
+            # Rescale based on ratio
+            ratio = ((sel_cand.max() - sel_cand.min()) /
                      (sel_clust.max() - sel_clust.min()))
-            feats_assign[ix, iy] = ratio*sel_clust
-            feats_fix[ix, iy] = sel_feats - feats_assign[ix, iy]
-            signal[pulse_stim_inds[0,ix]:pulse_stim_inds[1,ix], iy] = feats_fix[ix, iy]
+            sel_clust = ratio*sel_clust
+        else:
+            raise NotImplemented('Scaling type not implemented.')
 
-    return signal, feats_clust_short, feats_assign, feats_all, feats_fix, feats_train
+        template_similarity[ii] = \
+                sp_stats.pearsonr(sel_cand.flatten(), sel_clust.flatten())[0]
+        template_assign[ii] = cl_ix
+        template_scaled[:, ii] = sel_clust.flatten()
+
+    return template_similarity, template_assign, template_scaled
+
+
+def template_subtract(
+        artifact_candidates,
+        template_similarity,
+        template_scaled,
+        similarity_thr=0.5):
+    """
+    Remove artifact templates from artifact candidates on the basis of the
+    similarity of their matching.
+
+    Parameters
+    ----------
+    artifact_candidates: np.ndarray, shape: [n_sample x n_candidates]
+        Clipped artifact candidates from the original signal for a single channel
+        (from clip_artifact_candidates).
+
+    template_similarity: np.ndarray, shape: [n_candidates]
+        The correlational similarity between an artifact candidate and the best
+        matching template.
+
+    template_scaled: np.ndarray, shape: [n_sample x n_candidates]
+        Artifact templates scaled to fit the candidate artifact. 
+
+    similarity_thr: float
+        Threshold of similarity above which a matching template is removed from
+        the artifact candidate.
+
+    Returns
+    -------
+    artifact_fixed: np.ndarray, shape: [n_sample x n_candidates]
+        Artifact candidates with the matching template removed from the signal.
+    """
+
+    n_sample, n_candidate = artifact_candidates.shape
+
+    print('Removing template artifact from artifact candidate...')
+    artifact_fixed = []
+    for ii in range(n_candidate):
+        if template_similarity[ii] >= similarity_thr:
+            artifact_fixed.append(artifact_candidates[:, ii] - template_scaled[:, ii])
+        else:
+            artifact_fixed.append(artifact_candidates[:, ii])
+    artifact_fixed = np.array(artifact_fixed).T
+
+    return artifact_fixed
+
+
+def signal_reconstitute(signal, artifact_fixed, pulse_stim_inds):
+    """
+    Reconstitute the signal containing artifacts with fixed signal.
+
+    Parameters
+    ----------
+    signal: np.ndarray, shape: [n_sample]
+        Recorded neural signal with stimulation pulse artifact.
+
+    artifact_fixed: np.ndarray, shape: [n_sample x n_candidates]
+        Artifact candidates with the matching template removed from the signal.
+
+    pulse_stim_inds: np.ndarray, shape: [2 x n_candidates]
+        Onset and offset index of the candidate clips within the input signal.
+
+    Returns
+    -------
+    signal_fixed: np.ndarray, shape: [n_sample]
+        Neural signal with stimulation pulse artifact-free epochs re-inserted.
+    """
+
+    signal_fixed = signal.copy()
+    for ii, (ix_on, ix_off) in enumerate(pulse_stim_inds.T):
+        signal_fixed[ix_on:ix_off] = artifact_fixed[:, ii]
+    return signal_fixed
+
+
+def procrustes(X, Y, scaling=True, reflection='best'):
+    """
+    A port of MATLAB's `procrustes` function to Numpy.
+
+    Procrustes analysis determines a linear transformation (translation,
+    reflection, orthogonal rotation and scaling) of the points in Y to best
+    conform them to the points in matrix X, using the sum of squared errors
+    as the goodness of fit criterion.
+
+        d, Z, [tform] = procrustes(X, Y)
+
+    Inputs:
+    ------------
+    X, Y    
+        matrices of target and input coordinates. they must have equal
+        numbers of  points (rows), but Y may have fewer dimensions
+        (columns) than X.
+
+    scaling 
+        if False, the scaling component of the transformation is forced
+        to 1
+
+    reflection
+        if 'best' (default), the transformation solution may or may not
+        include a reflection component, depending on which fits the data
+        best. setting reflection to True or False forces a solution with
+        reflection or no reflection respectively.
+
+    Outputs
+    ------------
+    d       
+        the residual sum of squared errors, normalized according to a
+        measure of the scale of X, ((X - X.mean(0))**2).sum()
+
+    Z
+        the matrix of transformed Y-values
+
+    tform   
+        a dict specifying the rotation, translation and scaling that
+        maps X --> Y
+
+    """
+
+    n,m = X.shape
+    ny,my = Y.shape
+
+    muX = X.mean(0)
+    muY = Y.mean(0)
+
+    X0 = X - muX
+    Y0 = Y - muY
+
+    ssX = (X0**2.).sum()
+    ssY = (Y0**2.).sum()
+
+    # centred Frobenius norm
+    normX = np.sqrt(ssX)
+    normY = np.sqrt(ssY)
+
+    # scale to equal (unit) norm
+    X0 /= normX
+    Y0 /= normY
+
+    if my < m:
+        Y0 = np.concatenate((Y0, np.zeros(n, m-my)),0)
+
+    # optimum rotation matrix of Y
+    A = np.dot(X0.T, Y0)
+    U,s,Vt = np.linalg.svd(A,full_matrices=False)
+    V = Vt.T
+    T = np.dot(V, U.T)
+
+    if reflection != 'best':
+
+        # does the current solution use a reflection?
+        have_reflection = np.linalg.det(T) < 0
+
+        # if that's not what was specified, force another reflection
+        if reflection != have_reflection:
+            V[:,-1] *= -1
+            s[-1] *= -1
+            T = np.dot(V, U.T)
+
+    traceTA = s.sum()
+
+    if scaling:
+
+        # optimum scaling of Y
+        b = traceTA * normX / normY
+
+        # standarised distance between X and b*Y*T + c
+        d = 1 - traceTA**2
+
+        # transformed coords
+        Z = normX*traceTA*np.dot(Y0, T) + muX
+
+    else:
+        b = 1
+        d = 1 + ssY/ssX - 2 * traceTA * normY / normX
+        Z = normY*np.dot(Y0, T) + muX
+
+    # transformation matrix
+    if my < m:
+        T = T[:my,:]
+    c = muX - b*np.dot(muY, T)
+
+    #transformation values 
+    tform = {'rotation':T, 'scale':b, 'translation':c}
+
+    return d, Z, tform 
