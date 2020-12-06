@@ -664,17 +664,33 @@ def hdbscan_template(
         Artifact templates rescaled to fit the candidate artifact. 
     """
 
+    # Organize the outputs
+    template_dict = {
+        'training': {
+            'valid_candidates': np.array([]),
+            'hdb_model': np.array([]),
+        },
+        'clusters': {
+            'full': np.array([]),
+            'short': np.array([])
+        },
+        'matching': {
+            'similarity': np.array([]),
+            'assignment': np.array([]),
+            'fitted': np.array([])
+        }
+    }
+
     # Get the dataset size
     n_sample, n_candidate = artifact_candidates.shape
 
     # Normalize the artifact candidates
-    artifact_candidates_z = normalize_artifact_candidates(
-         artifact_candidates, robust=False)
+    artifact_candidates_z = normalize_artifact_candidates(artifact_candidates)
 
     ### TODO: Handle this condition
     if len(valid_candidates) == 0:
         valid_candidates = [*range(n_candidate)]
-    valid_candidates = np.array(valid_candidates)
+    valid_candidates = np.array(valid_candidates, dtype=int)
 
     # Align all the artifacts according to alignment criteria
     if align_type == 'slope':
@@ -684,33 +700,41 @@ def hdbscan_template(
     else:
         raise NotImplemented('Alignment type does not exist.')
 
-    # Discard samples outside of the alignment tolerance
-    midpt = midpt[valid_candidates]
+    ## Filter candidates based on alignment criteria
+    # 1. Discard samples outside of the alignment tolerance
+    valid_ix = valid_candidates.copy() #np.array([], dtype=int)
     if align_tol is not None:
         midpt_inds, midpt_cnts = np.unique(midpt, return_counts=True)
         midpt_mode = midpt_inds[np.argmax(midpt_cnts)]
-        valid_midpt_ix = np.flatnonzero((midpt >= (midpt_mode - align_tol)) &
-                                        (midpt <= (midpt_mode + align_tol)))
-        midpt = midpt[valid_midpt_ix]
-        valid_candidates = valid_candidates[valid_midpt_ix]
+        valid_ix = np.append(valid_ix,
+            np.flatnonzero(
+                (midpt >= (midpt_mode - align_tol)) &
+                (midpt <= (midpt_mode + align_tol))))
 
-    # Discard samples outside the fwin criteria
-    valid_midpt_ix = np.flatnonzero(((midpt-fwin[0]) >= 0) &
-                                    ((midpt+fwin[1]) <= n_sample))
-    midpt = midpt[valid_midpt_ix]
-    valid_candidates = valid_candidates[valid_midpt_ix]
+    # 2. Discard samples outside the fwin criteria
+    valid_ix = np.intersect1d(valid_ix,
+            np.flatnonzero(
+                ((midpt-fwin[0]) >= 0) &
+                ((midpt+fwin[1]) <= n_sample)))
+
+    # 3. Aggregate all the valid indices into one vector of candidates to use for
+    # training the model.
+    valid_ix = np.unique(valid_ix.flatten())
+    valid_candidates = np.intersect1d(valid_candidates, valid_ix)
+    midpt = midpt[valid_candidates]
+    template_dict['training']['valid_candidates'] = valid_candidates
 
     # Get the valid z-scored artifacts
     artifact_candidates_z_valid = artifact_candidates_z[:, valid_candidates]
     n_valid = len(valid_candidates)
 
     if n_valid == 0:
-        template_similarity = np.zeros(n_candidate)
-        template_assign = np.zeros(n_candidate)
-        template_scaled = np.zeros((n_sample, n_candidate))
-        return template_similarity, template_assign, template_scaled
+        template_dict['matching']['similarity'] = np.zeros(n_candidate)
+        template_dict['matching']['assignment'] =  np.zeros(n_candidate)
+        template_dict['matching']['fitted'] = np.zeros((n_sample, n_candidate))
+        return template_dict
 
-    # Create a training set of features by clipping the midpoint of the
+    ## Create a training set of features by clipping the midpoint of the
     # biphasic pulse
     artifact_train = np.zeros((n_valid, np.sum(fwin)))
     for ii in range(n_valid):
@@ -718,15 +742,16 @@ def hdbscan_template(
             artifact_candidates_z_valid[
                     (midpt[ii]-fwin[0]):(midpt[ii]+fwin[1]), ii]
 
-    # Train an HDBSCAN model
+    ## Train an HDBSCAN model
     print('Training HDBSCAN model of stim pulse artifacts...')
     hdbcl = HDBSCAN(min_cluster_size=hdbscan_min_cluster_size,
             min_samples=hdbscan_min_samples,
             gen_min_span_tree=True,
             core_dist_n_jobs=hdbscan_nproc,
-            metric='correlation',
+            metric='euclidean',
             allow_single_cluster=True)
     hdbcl.fit(artifact_train)
+    template_dict['training']['hdb_model'] = hdbcl
 
     # Get Cluster Means
     clust_train = np.array([np.mean(
@@ -737,6 +762,8 @@ def hdbscan_template(
         artifact_candidates_z_valid[:, hdbcl.labels_ == lbl], axis=1)
         for lbl in np.unique(hdbcl.labels_)])
     print('Calculated {} Artifact Templates'.format(len(np.unique(hdbcl.labels_))))
+    template_dict['clusters']['full'] = clust_all
+    template_dict['clusters']['short'] = clust_train
 
     # Match pulses with cluster templates, rescale, and remove
     print('Matching artifact candidates with learned templates...')
@@ -745,6 +772,7 @@ def hdbscan_template(
     template_scaled = np.zeros((n_sample, n_candidate))
     for ii in range(n_candidate):
         sel_cand = artifact_candidates[:, [ii]].copy()
+        #sel_cand = sel_cand - np.median(sel_cand, axis=0)
 
         if scale_type == 'procrustes':
             err_fit = []
@@ -773,8 +801,11 @@ def hdbscan_template(
                 sp_stats.pearsonr(sel_cand.flatten(), sel_clust.flatten())[0]
         template_assign[ii] = cl_ix
         template_scaled[:, ii] = sel_clust.flatten()
+    template_dict['matching']['similarity'] = template_similarity
+    template_dict['matching']['assignment'] =  template_assign
+    template_dict['matching']['fitted'] = template_scaled
 
-    return template_similarity, template_assign, template_scaled
+    return template_dict
 
 
 def template_subtract(
@@ -823,7 +854,7 @@ def template_subtract(
     return artifact_fixed
 
 
-def signal_reconstitute(signal, artifact_fixed, pulse_stim_inds):
+def signal_reconstitute(signal, artifact_fixed, pulse_stim_inds, rescale_win=None):
     """
     Reconstitute the signal containing artifacts with fixed signal.
 
@@ -846,7 +877,23 @@ def signal_reconstitute(signal, artifact_fixed, pulse_stim_inds):
 
     signal_fixed = signal.copy()
     for ii, (ix_on, ix_off) in enumerate(pulse_stim_inds.T):
-        signal_fixed[ix_on:ix_off] = artifact_fixed[:, ii]
+        rescale = artifact_fixed[:, ii]
+        if rescale_win is not None:
+            nmax = np.max([signal_fixed[ix_on-rescale_win[0]:ix_on],
+                           signal_fixed[ix_off:ix_off+rescale_win[1]]])
+            nmin = np.min([signal_fixed[ix_on-rescale_win[0]:ix_on],
+                           signal_fixed[ix_off:ix_off+rescale_win[1]]])
+
+            omax = artifact_fixed[:, ii].max()
+            omin = artifact_fixed[:, ii].min()
+
+            rescale = \
+                ((artifact_fixed[:, ii] - omin) / (omax-omin)) * (nmax-nmin) + nmin
+
+            rescale = ((nmax-nmin)/(omax-omin)) * artifact_fixed[:, ii]
+
+        signal_fixed[ix_on:ix_off] = rescale
+
     return signal_fixed
 
 
