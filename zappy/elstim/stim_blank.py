@@ -117,6 +117,7 @@ def blanks_as_inds(blank):
 
     return blnk_on, blnk_off
 
+
 def frequency_notch_list(line_freq=60, n_inter_pulse=[], Fs=None):
     """Return list of corrupted frequency bands"""
 
@@ -194,7 +195,7 @@ def revinterp_blank(signal, blank):
             wt = np.linspace(0, 1, dur)
             prev = signal[on-dur:on][::-1]
             fwd = signal[off:off+dur][::-1]
-            signal[on:off] = prev*wt[::-1] + fwd*wt
+            signal[on:off] = prev[::-1]*wt[::-1] + fwd[::-1]*wt
         except:
             m, yint, _, _, _ = stats.linregress([on - 1, off + 1],
                                                 [signal[on - 1], signal[off + 1]])
