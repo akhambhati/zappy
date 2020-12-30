@@ -45,14 +45,19 @@ def decimate(signal, fs_old, fs_new):
     n_s, n_ch = signal.shape
 
     # Decimation factor
-    q = int(np.round(fs_old / fs_new))
+    q = np.round(fs_old / fs_new)
+
+    # Find closest power of 2
+    pow2 = int(np.log2(q))
+    q = 2**pow2
 
     # Re-derived precise sampling frequency after finding optimal q
     fs_out = fs_old / q
 
     # Apply decimation to the signal, along the time axis
-    signal = sig.decimate(
-        signal, q=q, ftype='iir', zero_phase=True, axis=0)
+    for ii in range(pow2):
+        signal = sig.decimate(
+                signal, q=2, ftype='iir', zero_phase=True, axis=0)
 
     return signal, q
 
