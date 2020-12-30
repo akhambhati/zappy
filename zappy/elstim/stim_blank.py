@@ -99,6 +99,25 @@ def corrupt_stim_sample(stim_dirac, n_signal_len, n_pre_pad=0, n_post_pad=0):
     return stim_dirac_tile
 
 
+def blanks_as_inds(blank):
+    """Identify indices that contain stimulation artifact that need blanking"""
+
+    # Get the blank cutoffs
+    blnk_on = np.flatnonzero(np.diff(blank) > 0) + 1
+    blnk_off = np.flatnonzero(np.diff(blank) < 0) + 1
+
+    # Discard blanks that are trailing at the head or tail of the vector
+    if (blnk_off[0] < blnk_on[0]):
+        blnk_off = blnk_off[1:]
+
+    if (blnk_on[-1] > blnk_off[-1]):
+        blnk_on = blnk_on[:-1]
+
+    assert len(blnk_off) == len(blnk_on)
+
+    return blnk_on, blnk_off
+
+
 def frequency_notch_list(line_freq=60, n_inter_pulse=[], Fs=None):
     """Return list of corrupted frequency bands"""
 
@@ -130,7 +149,7 @@ def linterp_blank(signal, blank):
 
     # Get the blank cutoffs
     blnk_on = np.flatnonzero(np.diff(blank) > 0) + 1
-    blnk_off = np.flatnonzero(np.diff(blank) < 0) + 1
+    blnk_off = np.flatnonzero(np.diff(blank) < 0)
 
     # Discard blanks that are trailing at the head or tail of the vector
     if (blnk_off[0] < blnk_on[0]):
@@ -158,7 +177,7 @@ def revinterp_blank(signal, blank):
 
     # Get the blank cutoffs
     blnk_on = np.flatnonzero(np.diff(blank) > 0) + 1
-    blnk_off = np.flatnonzero(np.diff(blank) < 0) + 1
+    blnk_off = np.flatnonzero(np.diff(blank) < 0)
 
     # Discard blanks that are trailing at the head or tail of the vector
     if (blnk_off[0] < blnk_on[0]):

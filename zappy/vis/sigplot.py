@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, ax=None):
+def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, scale=3, ax=None):
     """
     Plot of the normalized signal in a stacked montage.
 
@@ -30,6 +30,10 @@ def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, ax=None):
     labels: array-like, len(n_ch)
         Labels corresponding to the channel names.
 
+    scale: float, default=3.0
+        Standard deviations of signal fluctuation by which the montage is
+        vertically spaced for each channel.
+
     ax: matplotlib axis
         For updating the plot post-hoc.
     """
@@ -46,7 +50,7 @@ def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, ax=None):
 
     sig_Z = (sig - np.nanmean(sig, axis=0)) / np.nanstd(sig, axis=0)
 
-    offset = np.arange(n_ch) * 3
+    offset = np.arange(n_ch) * scale
 
     for ch, sig_ch in enumerate(sig_Z.T):
         ax.plot(ts, sig_ch + offset[ch], color=color, alpha=0.5, linewidth=0.5)
@@ -58,7 +62,7 @@ def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, ax=None):
     ax.set_yticklabels(labels)
 
     ax.set_xlim([ts[0], ts[0] + wsize])
-    ax.set_ylim([np.min(offset) - 3, np.max(offset) + 3])
+    ax.set_ylim([np.min(offset) - scale, np.max(offset) + scale])
 
     plt.tight_layout()
 
