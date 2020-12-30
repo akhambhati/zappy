@@ -149,7 +149,7 @@ def linterp_blank(signal, blank):
 
     # Get the blank cutoffs
     blnk_on = np.flatnonzero(np.diff(blank) > 0) + 1
-    blnk_off = np.flatnonzero(np.diff(blank) < 0) + 1
+    blnk_off = np.flatnonzero(np.diff(blank) < 0)
 
     # Discard blanks that are trailing at the head or tail of the vector
     if (blnk_off[0] < blnk_on[0]):
@@ -177,7 +177,7 @@ def revinterp_blank(signal, blank):
 
     # Get the blank cutoffs
     blnk_on = np.flatnonzero(np.diff(blank) > 0) + 1
-    blnk_off = np.flatnonzero(np.diff(blank) < 0) + 1
+    blnk_off = np.flatnonzero(np.diff(blank) < 0)
 
     # Discard blanks that are trailing at the head or tail of the vector
     if (blnk_off[0] < blnk_on[0]):
@@ -195,7 +195,7 @@ def revinterp_blank(signal, blank):
             wt = np.linspace(0, 1, dur)
             prev = signal[on-dur:on][::-1]
             fwd = signal[off:off+dur][::-1]
-            signal[on:off] = prev[::-1]*wt[::-1] + fwd[::-1]*wt
+            signal[on:off] = prev*wt[::-1] + fwd*wt
         except:
             m, yint, _, _, _ = stats.linregress([on - 1, off + 1],
                                                 [signal[on - 1], signal[off + 1]])
