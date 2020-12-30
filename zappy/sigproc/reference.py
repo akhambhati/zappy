@@ -66,3 +66,37 @@ def general_reref(signal, channel_dist=None, channel_group=None):
         signal[:, grp_ix] = (signal[:, grp_ix].T - common).T
 
     return signal
+
+
+def bipolar_reref(signal, bipolar_pairs):
+    """
+    Re-reference the signal array to the (weighted) common average by
+    electrode groups. Flexible inputs enable different forms of re-referencing,
+    including common average, Laplacian, bipolar, GM/WM, surface/depth.
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_chan]
+        Signal recorded from multiple electrodes that are to be
+        re-referenced to a variation of the common average reference scheme.
+
+    bipolar_pairs: numpy.ndarray, shape: [n_pair x 2]
+        Array specifying indices for the anode and cathode in each bipolar
+        referenc pair.
+    """
+
+    # Get signal dimensionality
+    n_s, n_ch = signal.shape
+
+    # Get bipolar dimensionality
+    n_pair = bipolar_pairs.shape[0]
+
+    # Construct a new bipolar signal
+    signal_bp = np.zeros((n_s, n_pair))
+
+    # Populate bipolar signal
+    for p in range(n_pair):
+        signal_bp[:, p] = (signal[:, bipolar_pairs[p, 0]] -  
+                           signal[:, bipolar_pairs[p, 1]])
+
+    return signal_bp
