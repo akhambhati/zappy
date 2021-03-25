@@ -67,3 +67,30 @@ def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, scale=3, ax=N
     plt.tight_layout()
 
     return ax
+
+
+def plot_spectrogram(sig, fs, freqs, wsize=10.0, scale=3, ax=None):
+    sig = sig[...]
+    n_s, n_f = sig.shape
+
+    ts = np.arange(0, n_s) / fs
+
+    if ax is None:
+        plt.figure(figsize=(24, 12))
+        ax = plt.subplot(111)
+
+    sig_Z = (sig - np.nanmean(sig, axis=0)) / np.nanstd(sig, axis=0)
+
+    ax.imshow(sig_Z.T,
+       extent=[ts[0], ts[-1], np.log10(freqs[-1]), np.log10(freqs[0])],
+       vmin=-scale, vmax=scale,
+       aspect='auto',
+       cmap='RdBu_r')
+
+    ax.set_yticks(np.log10(np.array([1, 3, 8, 15, 30, 70, 170])))
+    ax.set_yticklabels(np.array([1, 3, 8, 15, 30, 70, 170]))    
+
+    if wsize is not None:
+        ax.set_xlim([ts[0], ts[0] + wsize])
+
+    return ax
