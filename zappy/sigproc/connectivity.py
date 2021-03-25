@@ -158,3 +158,73 @@ def amplitude_correlation(signal, cross_freq=False):
         X_acr = X_acr[np.arange(n_wv), np.arange(n_wv), :, :]
 
     return X_acr
+
+
+def xcorr_mag(signal, fs, tau_min=0, tau_max=None):
+    """
+    Compute inter-electrode cross-correlation of the iEEG signal.
+
+    XC = max(abs(xcorr(x1, x2)))
+    delay = argmax(abs(xcorr(x1, x2)))
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_freqs x n_chan]
+        Multi-electrode iEEG Signal that has been transformed to its
+        analytic amplitude.
+
+    fs: float
+        Sampling frequency of the signal.
+
+    tau_min: float
+        Shortest latency to consider in the cross-correlation window estimate
+
+    tau_max: float
+        Longest latency to consider in the cross-correlation window estimate
+
+    Returns
+    -------
+    xcr: numpy.ndarray, shape: [n_freqs x n_chan x n_chan]
+        Peak magnitude cross-correlation between channels per frequency.
+
+    delay: numpy.ndarray, shape: [n_freqs x n_chan x n_chan]
+        Delay of the peak magnitude cross-correlation between channels per frequency.
+    """
+
+    # Get data attributes
+    n_samp, n_freq, n_chan = signal.shape
+    triu_ix, triu_iy = np.triu_indices(n_chan, k=1)
+
+    # Normalize the signal
+    signal = np.abs(signal)
+    signal -= signal.mean(axis=0)
+    signal /= signal.std(axis=0)
+
+    # Initialize adjacency matrix
+    adj = np.zeros((n_freq, n_chan, n_chan))
+    delay = np.zeros((n_freq, n_chan, n_chan))
+
+    if tau_max is None:
+        tau_max = n_samp / fs
+    lags = np.hstack((range(0, n_samp, 1),
+                      range(-n_samp, 0, 1))) / fs
+    tau_ix = np.flatnonzero((np.abs(lags) >= tau_min) &
+                            (np.abs(lags) <= tau_max))
+
+    # Use FFT to compute cross-correlation
+    sig_fft = np.fft.rfft(
+        np.vstack((signal, np.zeros_like(signal))),
+        axis=0)
+
+    # Iterate over all edges
+    for n1, n2 in zip(triu_ix, triu_iy):
+        xc = 1 / n_samp * np.fft.irfft(
+            sig_fft[:, :, n1] * np.conj(sig_fft[:, :, n2]), axis=0)
+        adj[:, n1, n2] = np.max(np.abs(xc[tau_ix]), axis=0)
+
+        opt_lag = lags[tau_ix][np.argmax(np.abs(xc[tau_ix]), axis=0)]
+        delay[:, n1, n2] = opt_lag
+    adj = adj + adj.transpose((0,2,1))
+    delay = delay + -1*delay.transpose((0,2,1))
+
+    return adj, delay
