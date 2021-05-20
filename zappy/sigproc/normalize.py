@@ -7,6 +7,7 @@ Normalize or standardize signals with respect to reference distributions.
 
 
 import numpy as np
+import pandas as pd
 
 
 def zscore(data_dict, method='robust', scale=1.4826):
@@ -47,3 +48,71 @@ def zscore(data_dict, method='robust', scale=1.4826):
         signal /= np.nanstd(signal, axis=0)
 
     return signal
+
+
+def running_zscore(signal, fs, win):
+    """
+    Z-Score the signal along a given axis.
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_chan]
+        Signal recorded from multiple electrodes that are to be
+        normalized. Normalizes along the first axis.
+
+    fs: float
+        Sampling frequency of signal.
+
+    win: float
+        Historical window to z-score against.
+    """
+
+    # Get a copy of the signal
+    signal = signal.copy()
+
+    # Get signal attributes
+    n_s, n_ch = signal.shape
+
+    # Convert to pandas
+    df = pd.DataFrame(signal)
+    win_samp = int(fs*win)
+
+    r = df.rolling(window=win_samp)
+    m = r.mean().shift(1)
+    s = r.std(ddof=0).shift(1)
+    z = (df-m)/s
+
+    return z.values
+
+
+def smoothing(signal, fs, win):
+    """
+    Smooth the signal.
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_chan]
+        Signal recorded from multiple electrodes that are to be
+        normalized. Normalizes along the first axis.
+
+    fs: float
+        Sampling frequency of signal.
+
+    win: float
+        Historical window to z-score against.
+    """
+
+    # Get a copy of the signal
+    signal = signal.copy()
+
+    # Get signal attributes
+    n_s, n_ch = signal.shape
+
+    # Convert to pandas
+    df = pd.DataFrame(signal)
+    win_samp = int(fs*win)
+
+    r = df.rolling(window=win_samp)
+    m = r.mean()
+
+    return m.values
