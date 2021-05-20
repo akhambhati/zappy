@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, scale=3, ax=None):
+def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, zscore=True, scale=3, ax=None):
     """
     Plot of the normalized signal in a stacked montage.
 
@@ -48,7 +48,10 @@ def plot_time_stacked(sig, fs, wsize=10.0, color='k', labels=None, scale=3, ax=N
         plt.figure(figsize=(24, 12))
         ax = plt.subplot(111)
 
-    sig_Z = (sig - np.nanmean(sig, axis=0)) / np.nanstd(sig, axis=0)
+    if zscore:
+        sig_Z = (sig - np.nanmean(sig, axis=0)) / np.nanstd(sig, axis=0)
+    else:
+        sig_Z = sig
 
     offset = np.arange(n_ch) * scale
 
@@ -89,6 +92,33 @@ def plot_spectrogram(sig, fs, freqs, wsize=10.0, scale=3, ax=None):
 
     ax.set_yticks(np.log10(np.array([1, 3, 8, 15, 30, 70, 170])))
     ax.set_yticklabels(np.array([1, 3, 8, 15, 30, 70, 170]))    
+
+    if wsize is not None:
+        ax.set_xlim([ts[0], ts[0] + wsize])
+
+    return ax
+
+
+def plot_heatmap(sig, fs, wsize=10.0, labels=None, scale=3, ax=None):
+    sig = sig[...]
+    n_s, n_c = sig.shape
+
+    ts = np.arange(0, n_s) / fs
+
+    if ax is None:
+        plt.figure(figsize=(24, 12))
+        ax = plt.subplot(111)
+
+    ax.imshow(sig[:, ::-1].T,
+       extent=[ts[0], ts[-1], 0, n_c],
+       vmin=-scale, vmax=scale, interpolation='none',
+       aspect='auto', cmap='RdBu_r')
+
+    ax.set_yticks(np.arange(n_c) + 0.5)
+    if labels is None:
+        ax.set_yticklabels(np.arange(n_c))
+    else:
+        ax.set_yticklabels(labels)
 
     if wsize is not None:
         ax.set_xlim([ts[0], ts[0] + wsize])
