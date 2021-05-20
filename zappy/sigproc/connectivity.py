@@ -38,9 +38,10 @@ def _tdot(X_cn, imag):
     return X_tdot
 
 
-def phase_locking_value(signal, cross_freq=False, coherence=False, imag=False):
+def spectral_synchrony(signal, metric=None, cross_freq=False):
     """
-    Compute inter-electrode phase coherence of the iEEG signal.
+    Compute inter-electrode synchrony of the iEEG signal based on its spectral
+    characteristics.
 
     Parameters
     ----------
@@ -48,61 +49,117 @@ def phase_locking_value(signal, cross_freq=False, coherence=False, imag=False):
         Multi-electrode iEEG Signal that has been transformed to the
         complex-domain (via. Hilbert or Wavelet).
 
+    metric: ['plv', 'iplv', 'ciplv', 'coh', 'icoh', 'pli', 'wpli', 'debpli]
+        Must supply a metric for calculating spectral synchrony.
+        plv - phase locking value (Bruña, R. et. al., 2018).
+        iplv - imaginary phase locking value (Bruña, R. et. al., 2018).
+        ciplv - corrected imaginary phase locking value (Bruña, R. et. al., 2018).
+        coh - coherence (Bruña, R. et. al., 2018).
+        icoh - imaginary coherence (Bruña, R. et. al., 2018).
+        wpli - weighted phase lag index (Vinck et al., 2011)
+        debwpli - debiased weighted phase lag index (Vinck et al., 2011)
+
     cross_freq: bool
         Whether to retain the cross-frequency interactions, also known as
         the cross-frequency coupling.
         Default is False.
 
-    coherence: bool
-        Whether to weight the phase-locking value by the amplitude of the
-        frequency component, akin to calculating the signal coherence.
-        Default is False.
-
-    imag: bool
-        Whether to only utilize the imaginary component of the complex-valued
-        signal. Akin to calculating the imaginary phase-locking or
-        imaginary coherence. Setting this to true may help mitigate issues
-        associated with volume conduction bias on connectivity estimates.
-        Default is False.
-
     Returns
     -------
     if cross_freq is False:
-        X_plv: numpy.ndarray (Complex), shape: [n_freqs x n_chan x n_chan]
-            Phase-locking value between channels per frequency.
+        X: numpy.ndarray (Complex), shape: [n_freqs x n_chan x n_chan]
+            Synchrony between channels per frequency.
     else:
-        X_plv: numpy.ndarray (Complex), shape: [n_freqs x n_freqs x n_chan x n_chan]
-            Phase-locking value between channels and between frequencies.
+        X: numpy.ndarray (Complex), shape: [n_freqs x n_freqs x n_chan x n_chan]
+            Synchony between channels and between frequencies.
     """
 
     # Get axes sizes
     n_ts, n_wv, n_ch = signal.shape
 
-    # Normalize signal to unit magnitude
     X_cn = signal.copy()
+
+    # Pre-compute the  magnitude
     X_a = np.abs(X_cn)
-    if not coherence:
-        X_cn /= X_a
 
-    # Compute phase-locking-value using tensor manipulation
-    X_plv = _tdot(X_cn, imag=imag)
+    # Compute numerator
+    if metric in ['plv', 'iplv', 'ciplv']:
+        E_XY_tdot = np.tensordot(X_cn/X_a, np.conj(X_cn/X_a), axes=((0), (0))) / n_ts
+    elif metric in ['coh', 'icoh', 'wpli']:
+        E_XY_tdot = np.tensordot(X_cn, np.conj(X_cn), axes=((0), (0))) / n_ts
+    elif metric in ['pli']:
+        E_XY_tdot = np.zeros((n_wv, n_ch, n_wv, n_ch))
+        for x_cn in X_cn:
+            E_XY_tdot += np.sign(np.tensordot(
+                    np.expand_dims(x_cn, axis=0),
+                    np.expand_dims(np.conj(x_cn), axis=0),
+                    axes=((0), (0))).imag)
+        E_XY_tdot /= n_ts
+    elif metric in ['debwpli']:
+        pass
+    else:
+        raise NotImplemented('Provided metric, {:s}, is unsupported.'.format(metric))
 
-    # Divide by magnitude of the signal, if coherence
-    if coherence:
-        X_plv /= np.sqrt(np.tensordot(
-            np.expand_dims(np.abs(X_a**2).sum(axis=0), axis=0),
-            np.expand_dims(np.abs(X_a**2).sum(axis=0), axis=0),
+    # Compute denominator
+    if metric in ['plv', 'iplv', 'pli']:
+        E_XX_tdot = np.ones_like(E_XY_tdot)
+    elif metric in ['ciplv']:
+        E_XX_tdot = np.sqrt(1 - np.abs((E_XY_tdot.real) / n_ts)**2)
+    elif metric in ['coh', 'icoh']:
+        E_XX_tdot = np.sqrt(np.tensordot(
+            np.expand_dims((X_a**2).mean(axis=0), axis=0),
+            np.expand_dims((X_a**2).mean(axis=0), axis=0),
             axes=((0), (0))))
-        X_plv *= n_ts
+    elif metric in ['wpli']:
+        E_XX_tdot = np.zeros((n_wv, n_ch, n_wv, n_ch))
+        for x_cn in X_cn:
+            E_XX_tdot += np.abs(np.tensordot(
+                    np.expand_dims(x_cn, axis=0),
+                    np.expand_dims(np.conj(x_cn), axis=0),
+                    axes=((0), (0))).imag)
+        E_XX_tdot /= n_ts
+    elif metric in ['debwpli']:
+        pass
 
-    # Re-arrange tensordot axes
-    X_plv = np.transpose(X_plv, (0, 2, 1, 3))
+    # Compute final metric
+    if metric in ['iplv', 'ciplv', 'icoh', 'wpli']:
+        E_XY_tdot = np.abs(E_XY_tdot.imag / E_XX_tdot)
+    elif metric in ['plv', 'coh']:
+        E_XY_tdot = np.abs((E_XY_tdot / E_XX_tdot))
+    elif metric in ['pli']:
+        E_XY_tdot = np.abs(E_XY_tdot / E_XX_tdot)
+    elif metric in ['debwpli']:
+        sum_im_csd = np.zeros((n_wv, n_ch, n_wv, n_ch))
+        sum_abs_im_csd = np.zeros((n_wv, n_ch, n_wv, n_ch))
+        sum_sq_im_csd = np.zeros((n_wv, n_ch, n_wv, n_ch))
+
+        for x_cn in X_cn:
+            tdot = np.tensordot(
+                    np.expand_dims(x_cn, axis=0),
+                    np.expand_dims(np.conj(x_cn), axis=0),
+                    axes=((0), (0))).imag
+            sum_im_csd += tdot
+            sum_abs_im_csd += np.abs(tdot)
+            sum_sq_im_csd += np.abs(tdot**2)
+
+        numer = sum_im_csd**2 - sum_sq_im_csd
+        denom = sum_abs_im_csd**2 - sum_sq_im_csd
+        z_denom = denom == 0
+        denom[z_denom] = 1
+        E_XY_tdot = numer / denom
+        E_XY_tdot[z_denom] = 0
+    else:
+        return None
+    E_XY_tdot = np.nan_to_num(E_XY_tdot)
+
+    # Rearrange the tensor and remove cross-frequency components if desired
+    E_XY_tdot =  np.transpose(E_XY_tdot, (0, 2, 1, 3))
 
     # Remove off-diagonal entries if not considering cross-frequency coupling
     if not cross_freq:
-        X_plv = X_plv[np.arange(n_wv), np.arange(n_wv), :, :]
+        E_XY_tdot = E_XY_tdot[np.arange(n_wv), np.arange(n_wv), :, :]
 
-    return X_plv
+    return E_XY_tdot
 
 
 def amplitude_correlation(signal, cross_freq=False):
