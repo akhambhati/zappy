@@ -141,7 +141,7 @@ def high_pass_filter(signal, fs, corner_freq, stop_tol=10):
 
     # Compute stop-band frequency
     corner_freq = np.float(corner_freq)
-    stop_freq = (stop_tol/100)*corner_freq
+    stop_freq = (1 - stop_tol/100)*corner_freq
 
     # Get butterworth filter parameters
     buttord_params = {'wp': corner_freq,    # Passband
