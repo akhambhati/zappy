@@ -34,7 +34,7 @@ def resample_factor(fs_old, fs_new):
         Decimation factor by which the signal was downsampled.
     """ 
 
-    q = np.round(fs_old / fs_new)
+    q = int(np.round(fs_old / fs_new))
     fs_out= fs_old/q
 
     return fs_out, q
