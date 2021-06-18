@@ -10,6 +10,36 @@ import numpy as np
 import scipy.signal as sig
 
 
+
+def resample_factor(fs_old, fs_new):
+    """
+    Calculate closest integer for downsampling.
+
+    Parameters
+    ----------
+    fs_old: float
+        Sampling frequency of the signal, before decimation.
+
+    fs_new: float
+        Target sampling frequency of the signal, after decimation. Actual
+        frequency of downsampled signal will vary, refer to the output fs
+        for most precise frequency.
+
+    Returns
+    -------
+    fs_out: flost
+        Achieved downsample frequency based on closest integer quotient.
+
+    q: int
+        Decimation factor by which the signal was downsampled.
+    """ 
+
+    q = np.round(fs_old / fs_new)
+    fs_out= fs_old/q
+
+    return fs_out, q
+
+
 def decimate(signal, fs_old, fs_new):
     """
     Apply an anti-alias filter and downsample the signal.
@@ -44,7 +74,7 @@ def decimate(signal, fs_old, fs_new):
     n_s, n_ch = signal.shape
 
     # Decimation factor
-    q = np.round(fs_old / fs_new)
+    fs_out, q = resample_factor(fs_old, fs_new)
 
     # Find closest power of 2
     pow2 = int(np.log2(q))
@@ -95,10 +125,7 @@ def downsample(signal, fs_old, fs_new):
     n_s, n_ch = signal.shape
 
     # Decimation factor
-    q = np.round(fs_old / fs_new)
-
-    # Re-derived precise sampling frequency after finding optimal q
-    fs_out = fs_old / q
+    fs_out, q = resample_factor(fs_old, fs_new)
 
     # Resample by optimal q
     signal = signal[::q]
