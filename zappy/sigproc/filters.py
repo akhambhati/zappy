@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Commonly used low-pass, high-pass, and notch filtering schemes
-for intracranial EEG processing.
+Routine pipelines commonly used to process intracranial EEG data.
 
 :Author: Ankit N. Khambhati
 """
@@ -9,6 +8,36 @@ for intracranial EEG processing.
 
 import numpy as np
 import scipy.signal as sig
+
+
+
+def resample_factor(fs_old, fs_new):
+    """
+    Calculate closest integer for downsampling.
+
+    Parameters
+    ----------
+    fs_old: float
+        Sampling frequency of the signal, before decimation.
+
+    fs_new: float
+        Target sampling frequency of the signal, after decimation. Actual
+        frequency of downsampled signal will vary, refer to the output fs
+        for most precise frequency.
+
+    Returns
+    -------
+    fs_out: flost
+        Achieved downsample frequency based on closest integer quotient.
+
+    q: int
+        Decimation factor by which the signal was downsampled.
+    """ 
+
+    q = int(np.round(fs_old / fs_new))
+    fs_out= fs_old/q
+
+    return fs_out, q
 
 
 def decimate(signal, fs_old, fs_new):
@@ -45,7 +74,7 @@ def decimate(signal, fs_old, fs_new):
     n_s, n_ch = signal.shape
 
     # Decimation factor
-    q = np.round(fs_old / fs_new)
+    fs_out, q = resample_factor(fs_old, fs_new)
 
     # Find closest power of 2
     pow2 = int(np.log2(q))
@@ -62,24 +91,31 @@ def decimate(signal, fs_old, fs_new):
     return signal, q
 
 
-def remove_drift(signal, fs):
+def downsample(signal, fs_old, fs_new):
     """
-    Apply a high-pass Butterworth filter to remove drift component. Should
-    preserve Delta frequencies >1 Hz.
+    Downsamples the signal but does not apply anti-aliasing filter.
 
     Parameters
     ----------
     signal: numpy.ndarray, shape: [n_sample x n_chan]
         Signal recorded from multiple electrodes that are to be
-        notch filtered.
+        low-pass filtered and then decimated.
 
-    fs: float
-        Sampling frequency of the signal.
+    fs_old: float
+        Sampling frequency of the signal, before decimation.
+
+    fs_new: float
+        Target sampling frequency of the signal, after decimation. Actual
+        frequency of downsampled signal will vary, refer to the output fs
+        for most precise frequency.
 
     Returns
     -------
     signal: numpy.ndarray, shape: [n_sample x n_chan]
-        Signal with drift removed.
+        Decimated signal.
+
+    q: int
+        Decimation factor by which the signal was downsampled.
     """
 
     # Get a copy of the signal
@@ -88,9 +124,55 @@ def remove_drift(signal, fs):
     # Get signal attributes
     n_s, n_ch = signal.shape
 
+    # Decimation factor
+    fs_out, q = resample_factor(fs_old, fs_new)
+
+    # Resample by optimal q
+    signal = signal[::q]
+
+    return signal, fs_out
+
+
+def high_pass_filter(signal, fs, corner_freq, stop_tol=10):
+    """
+    Apply a high-pass Butterworth filter to remove drift/low-frequency content.
+
+    Defines a Butterworth filter using second-order sections (SOS).
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_chan]
+        Signal recorded from multiple electrodes for drift removal.
+
+    fs: float
+        Sampling frequency of the signal.
+
+    corner_freq: float
+        3db corner frequency of the passband.
+
+    stop_tol: float
+        60db stop frequency of the stopband, defined as a percentage of the 
+        corner frequency. Default=10 (10 percent below the corner_frequency).
+
+    Returns
+    -------
+    signal: numpy.ndarray, shape: [n_sample x n_chan]
+        Low-pass filtered signal.
+    """
+
+    # Get a copy of the signal
+    signal = signal.copy()
+
+    # Get signal attributes
+    n_s, n_ch = signal.shape
+
+    # Compute stop-band frequency
+    corner_freq = np.float(corner_freq)
+    stop_freq = (1 - stop_tol/100)*corner_freq
+
     # Get butterworth filter parameters
-    buttord_params = {'wp': 1.0,            # Passband 1 Hz
-                      'ws': 0.5,            # Stopband 0.5 Hz
+    buttord_params = {'wp': corner_freq,    # Passband
+                      'ws': stop_freq,      # Stopband
                       'gpass': 3,           # 3dB corner at pass band
                       'gstop': 60,          # 60dB min. attenuation at stop band 
                       'analog': False,      # Digital filter
@@ -106,10 +188,11 @@ def remove_drift(signal, fs):
     return signal
 
 
-def remove_hfreq(signal, fs):
+def low_pass_filter(signal, fs, corner_freq, stop_tol=10):
     """
-    Apply a low-pass Butterworth filter to remove high-frequency content above 1000 Hz. Should
-    preserve frequencies <1000 Hz.
+    Apply a low-pass Butterworth filter to remove high-frequency content.
+
+    Defines a Butterworth filter using second-order sections (SOS).
 
     Parameters
     ----------
@@ -120,10 +203,17 @@ def remove_hfreq(signal, fs):
     fs: float
         Sampling frequency of the signal.
 
+    corner_freq: float
+        3db corner frequency of the passband.
+
+    stop_tol: float
+        60db stop frequency of the stopband, defined as a percentage of the 
+        corner frequency. Default=10 (10 percent above the corner_frequency).
+
     Returns
     -------
     signal: numpy.ndarray, shape: [n_sample x n_chan]
-        Signal with drift removed.
+        Low-pass filtered signal.
     """
 
     # Get a copy of the signal
@@ -132,9 +222,13 @@ def remove_hfreq(signal, fs):
     # Get signal attributes
     n_s, n_ch = signal.shape
 
+    # Compute stop-band frequency
+    corner_freq = np.float(corner_freq)
+    stop_freq = (1+stop_tol/100)*corner_freq
+
     # Get butterworth filter parameters
-    buttord_params = {'wp': 1000.0,            # Passband 1 Hz
-                      'ws': 1100.0,            # Stopband 0.5 Hz
+    buttord_params = {'wp': corner_freq,    # Passband
+                      'ws': stop_freq,      # Stopband
                       'gpass': 3,           # 3dB corner at pass band
                       'gstop': 60,          # 60dB min. attenuation at stop band 
                       'analog': False,      # Digital filter
