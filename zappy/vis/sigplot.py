@@ -124,3 +124,33 @@ def plot_heatmap(sig, fs, wsize=10.0, labels=None, scale=3, ax=None):
         ax.set_xlim([ts[0], ts[0] + wsize])
 
     return ax
+
+
+def plot_heatmap_raw(sig, fs, wsize=10.0, labels=None, tail_cutoff=0, cmap='RdBu_r', ax=None):
+    sig = sig[...]
+    n_s, n_c = sig.shape
+
+    ts = np.arange(0, n_s) / fs
+
+    if ax is None:
+        plt.figure(figsize=(24, 12))
+        ax = plt.subplot(111)
+
+    vmin = np.nanpercentile(sig, tail_cutoff)
+    vmax = np.nanpercentile(sig, 100-tail_cutoff)
+    mat = ax.imshow(sig[:, ::-1].T,
+       extent=[ts[0], ts[-1], 0, n_c],
+       vmin=vmin, vmax=vmax, interpolation='none',
+       aspect='auto', cmap=cmap)
+    plt.colorbar(mat, ax=ax)
+
+    ax.set_yticks(np.arange(n_c) + 0.5)
+    if labels is None:
+        ax.set_yticklabels(np.arange(n_c))
+    else:
+        ax.set_yticklabels(labels)
+
+    if wsize is not None:
+        ax.set_xlim([ts[0], ts[0] + wsize])
+
+    return ax
