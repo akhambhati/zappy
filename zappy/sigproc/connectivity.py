@@ -217,6 +217,51 @@ def amplitude_correlation(signal, cross_freq=False):
     return X_acr
 
 
+def xcorr_fft(signal, fs):
+    """
+    Compute inter-electrode cross-correlation of the iEEG signal.
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_chan x n_chan]
+        Multi-electrode iEEG signal.
+
+    fs: float
+        Sampling frequency of the signal.
+
+    Returns
+    -------
+    xcr: numpy.ndarray, shape: [n_lags x n_chan x n_chan]
+        Peak magnitude cross-correlation between channels.
+
+    lags: numpy.ndarray, shape: [n_lags]
+        Delay of the cross-correlation between channels in seconds.
+    """
+
+    # Get data attributes
+    n_samp, n_chan = signal.shape
+
+    # Calibrate lags
+    lags = np.arange(-n_samp // 2+1, n_samp // 2+1) / fs
+    n_lags = len(lags)
+
+    # Pre-compute channel-wise FFT
+    FFT_X = np.fft.fft(signal, axis=0)
+
+    # Pre-compute reverse channel-wise FFT
+    FFTUD_Y = np.fft.fft(np.flipud(signal), axis=0)
+
+    # Form a grid for cross-channel FFT multiplication
+    GRID = np.meshgrid(
+            np.arange(n_chan),
+            np.arange(n_chan))
+    FFT_GRID = FFT_X[:,GRID[0]] * FFTUD_Y[:,GRID[1]]
+
+    # Compute the inverse FFT of the cross-channel product
+    xcr = np.fft.fftshift(np.real(np.fft.ifft(FFT_GRID, axis=0)), axes=0)
+    return xcr, lags
+
+
 def xcorr_mag(signal, fs, tau_min=0, tau_max=None):
     """
     Compute inter-electrode cross-correlation of the iEEG signal.
@@ -285,3 +330,46 @@ def xcorr_mag(signal, fs, tau_min=0, tau_max=None):
     delay = delay + -1*delay.transpose((0,2,1))
 
     return adj, delay
+
+
+def gcc_phat(signal, fs):
+    """
+    Compute inter-electrode cross-correlation of the iEEG signal.
+
+    Parameters
+    ----------
+    signal: numpy.ndarray, shape: [n_sample x n_chan x n_chan]
+        Multi-electrode iEEG signal.
+
+    fs: float
+        Sampling frequency of the signal.
+
+    Returns
+    -------
+    xcr: numpy.ndarray, shape: [n_lags x n_chan x n_chan]
+        Peak magnitude cross-correlation between channels.
+
+    lags: numpy.ndarray, shape: [n_lags]
+        Delay of the cross-correlation between channels in seconds.
+    """
+
+    # Get data attributes
+    n_samp, n_chan = signal.shape
+
+    # Calibrate lags
+    lags = np.arange(-n_samp // 2+1, n_samp // 2+1) / fs
+    n_lags = len(lags)
+
+    # Pre-compute channel-wise FFT
+    FFT_X = np.fft.fft(signal, axis=0)
+
+    # Form a grid for cross-channel FFT multiplication
+    GRID = np.meshgrid(
+            np.arange(n_chan),
+            np.arange(n_chan))
+    FFT_GRID = FFT_X[:,GRID[0]] * np.conj(FFT_X[:,GRID[1]])
+
+    # Compute the inverse FFT of the cross-channel product
+    xcr = np.fft.fftshift(np.real(np.fft.ifft(FFT_GRID / np.abs(FFT_GRID), axis=0)), axes=0)
+    return xcr, lags
+
