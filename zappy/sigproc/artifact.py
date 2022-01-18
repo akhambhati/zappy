@@ -19,13 +19,17 @@ def population_linelength(signal):
 
 def local_outlier_factor(signal, n_neighbors=None):
     """
-    Spatial correlation along a given axis.
+    Fit a LocalOutlierFactor model using signal channels as features. Returns an
+    outlier score for each channel. 
 
     Parameters
     ----------
     signal: numpy.ndarray, shape: [n_sample x n_chan]
-        Signal recorded from multiple electrodes that are to be
-        normalized. Normalizes along the first axis.
+        Multichannel signal in which to detect outliers.
+
+    n_neighbors: float
+        Number of neighbors an inlier should have. This value is used to calculate
+        each channel's outlier score. 
 
     Returns
     -------
@@ -44,82 +48,53 @@ def local_outlier_factor(signal, n_neighbors=None):
     return outlier_score
 
 
-def check_channel_state(
-    signal,
-
-    channel_otl_state=None,
-    channel_otl_weight=0.99,
-    channel_otl_thresh=10,
-    channel_neighbors=10):
+def update_outlier_state(
+    otl_scores,
+    otl_thresh=10,
+    otl_state=None,
+    otl_decay=0.99):
 
     """
-    Spatial correlation along a given axis.
+    Update the outlier state vector based on current outlier scores of features:
+        X(t) = AX(t-1) + U(t)
 
     Parameters
     ----------
-    signal: numpy.ndarray, shape: [n_sample x n_chan]
-        Signal recorded from multiple electrodes that are to be
-        normalized. Normalizes along the first axis.
+    otl_scores: numpy.ndarray, shape: [n]
+        Continuous-valued vector of scores corresponding to the likelihood(s) that
+        one or more features are outliers.
+
+    otl_thresh: float
+        Binary threshold used to define whether otl_scores values are
+        true outliers.
+
+    otl_state: numpy.ndarray, shape: [n]
+        Continuous-valued state vector X(t-1) corresponding to each feature's
+        previous outlier state.
+
+    otl_decay: float
+        Weighting (A) given to prior outlier states X(t-1). Greater value 
+        associated with longer memory and slower exponential decay of
+        outlier state. Should not exceed value of 1.
 
     Returns
     -------
-    outlier_score: numpy.ndarray, shape: [n_chan]
-        Outlier factor for each channel quantifying the distance of the channel
-        from its nearest neighbors within the feature space. Greater values
-        are associated with increased outlier likelihood.
+    otl_state: numpy.ndarray, shape: [n]
+        Continuous-valued state vector X(t) corresponding to each feature's
+        current outlier state.
     """
 
-    # Assess immediate outlier score
-    curr_otl_chan = local_outlier_factor(signal, n_neighbors=channel_neighbors) > channel_otl_thresh
+    # Check that state vector won't explode.
+    assert otl_decay <= 1
 
-    # Propagate channel state forward
-    if channel_otl_state is None:
-        channel_otl_state = curr_otl_chan
+    # Binarize the outlier scores to determine whether an outlier is observed.
+    binary_otl = otl_scores > otl_thresh
+
+    # Propagate outlier state forward
+    if otl_state is None:
+        otl_state = binary_otl
     else:
-        channel_otl_state = \
-            channel_otl_weight*channel_otl_state + curr_otl_chan
+        otl_state = \
+            otl_decay*otl_state + binary_otl
 
-    return channel_otl_state, curr_otl_chan
-
-
-def check_epoch_state(
-    signal,
-
-    epoch_run_otl=None,
-    epoch_run_burn=30,
-    epoch_otl_state=None,
-    epoch_otl_weight=0.99,
-    epoch_otl_thresh=10):
-    """
-    Spatial correlation along a given axis.
-
-    Parameters
-    ----------
-    signal: numpy.ndarray, shape: [n_sample x n_chan]
-        Signal recorded from multiple electrodes that are to be
-        normalized. Normalizes along the first axis.
-
-    Returns
-    -------
-    outlier_score: numpy.ndarray, shape: [n_chan]
-        Outlier factor for each channel quantifying the distance of the channel
-        from its nearest neighbors within the feature space. Greater values
-        are associated with increased outlier likelihood.
-    """
-
-    # Assess immeediate population variability
-    pop_LL = population_linelength(signal)
-
-    # Propogate population state forward
-    epoch_run_otl, pop_LL_zv = welford_stats(
-        pop_LL, run_stats=epoch_run_otl,
-        burn=epoch_run_burn, zskip=[-epoch_otl_thresh, epoch_otl_thresh])
-
-    # Calculate cooldown
-    if epoch_otl_state is None:
-        epoch_otl_state = (np.nan_to_num(pop_LL_zv) > epoch_otl_thresh)
-    else:
-        epoch_otl_state = \
-            epoch_otl_weight*epoch_otl_state + (np.nan_to_num(pop_LL_zv) > epoch_otl_thresh)
-
-    return epoch_otl_state, epoch_run_otl, pop_LL_zv
+    return otl_state
