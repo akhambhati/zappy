@@ -44,13 +44,14 @@ def local_outlier_factor(signal, n_neighbors=None):
 
     clf = LocalOutlierFactor(n_neighbors=(artifact_feats.shape[0] // 4) if n_neighbors is None else n_neighbors)
     outlier = clf.fit_predict(artifact_feats)
-    outlier_score = -1*clf.negative_outlier_factor_
+    outlier_score = sp_stats.zscore(-1*clf.negative_outlier_factor_).clip(min=0)
     return outlier_score
 
 
 def update_outlier_state(
     otl_scores,
     otl_thresh=10,
+    otl_rescale=None,
     otl_state=None,
     otl_decay=0.99):
 
@@ -67,6 +68,10 @@ def update_outlier_state(
     otl_thresh: float
         Binary threshold used to define whether otl_scores values are
         true outliers.
+
+    otl_rescale: numpy.ndarray(float), shape: [n]
+        Multiplier for the otl_score values to accentuate more drastic outlier events
+        from more benign ones. Default is scale is 1.
 
     otl_state: numpy.ndarray, shape: [n]
         Continuous-valued state vector X(t-1) corresponding to each feature's
@@ -88,7 +93,14 @@ def update_outlier_state(
     assert otl_decay <= 1
 
     # Binarize the outlier scores to determine whether an outlier is observed.
-    binary_otl = otl_scores > otl_thresh
+    if otl_thresh is None:
+        binary_otl = otl_scores
+    else:
+        binary_otl = otl_scores > otl_thresh
+
+    # Multiply the outlier scores by a rescale factor
+    if otl_rescale is not None:
+        binary_otl *= otl_rescale
 
     # Propagate outlier state forward
     if otl_state is None:
