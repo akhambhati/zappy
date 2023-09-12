@@ -1,1 +1,1 @@
-from . import normalize, reference, filters, wavelet, connectivity
+from . import normalize, reference, filters, connectivity

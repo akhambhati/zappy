@@ -7,8 +7,6 @@ Apply Connectivity Metrics to raw or transformed intracranial EEG.
 
 
 import numpy as np
-import pyeisen
-import pyfftw
 
 
 def _tdot(X_cn, imag):
