@@ -73,7 +73,7 @@ def closest_square(n):
     return i, n // i
 
 
-def make_virtual_bipolar(electrode_groups: List[ElectrodeGroup]) -> List[ElectrodeGroup]:
+def make_virtual_bipolar_channels(electrode_groups: List[ElectrodeGroup]) -> List[ElectrodeGroup]:
     vgroups = []
     vidx = 0
     for egrp in electrode_groups:
@@ -99,7 +99,19 @@ def make_virtual_bipolar(electrode_groups: List[ElectrodeGroup]) -> List[Electro
                 vchans.append(vchan) 
                 vidx += 1
 
-        vgrp: ElectrodeGroup = {'name': vname, 'type': vtype, 'electrode_contacts': vchans}
+        vgrp = ElectrodeGroup(name=vname, type=vtype, electrode_contacts=vchans)
         vgroups.append(vgrp)
 
     return vgroups
+
+
+def make_virtual_signal(signal: npt.NDArray[np.float_], electrode_groups: List[ElectrodeGroup]) -> npt.NDArray:
+    vsignal = []
+    reindex = []
+    for vgrp in electrode_groups:
+        for vchan in vgrp.electrode_contacts:
+            reindex.append(vchan['index'])
+            vsignal.append(signal[:, [ch['index'] for ch in vchan['anode_index']]].mean(axis=1) -
+                           signal[:, [ch['index'] for ch in vchan['cathode_index']]].mean(axis=1))
+    return np.array(vsignal)[reindex].T
+
