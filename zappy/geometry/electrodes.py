@@ -89,13 +89,13 @@ def make_virtual_bipolar(electrode_groups: List[ElectrodeGroup]) -> List[Electro
         vchans = []
         if n_row > 1:
             for ii, (bp1, bp2) in enumerate(zip(CA[:-1, :].flatten(), CA[1:, :].flatten())):
-                vchan: VirtualContact = {'name': 'v{}{}'.format(egrp.name, ii+1), 'index': vidx, 'anode_index': [egrp.electrode_contacts[bp1]], 'cathode_index': [egrp.electrode_contacts[bp2]], 'coord': egrp.coords[[bp1, bp2]].mean(axis=0)}
+                vchan: VirtualContact = {'name': 'v{}-{}'.format(egrp.name, ii+1), 'index': vidx, 'anode_index': [egrp.electrode_contacts[bp1]], 'cathode_index': [egrp.electrode_contacts[bp2]], 'coord': egrp.coords[[bp1, bp2]].mean(axis=0)}
                 vchans.append(vchan) 
                 vidx += 1
 
         if n_col > 1:
             for ii, (bp1, bp2) in enumerate(zip(CA[:, :-1].flatten(), CA[:, 1:].flatten())):
-                vchan: VirtualContact = {'name': 'v{}{}'.format(egrp.name, ii+1), 'index': vidx, 'anode_index': [egrp.electrode_contacts[bp1]], 'cathode_index': [egrp.electrode_contacts[bp2]], 'coord': egrp.coords[[bp1, bp2]].mean(axis=0)}
+                vchan: VirtualContact = {'name': 'v{}-{}'.format(egrp.name, ii+1), 'index': vidx, 'anode_index': [egrp.electrode_contacts[bp1]], 'cathode_index': [egrp.electrode_contacts[bp2]], 'coord': egrp.coords[[bp1, bp2]].mean(axis=0)}
                 vchans.append(vchan) 
                 vidx += 1
 
