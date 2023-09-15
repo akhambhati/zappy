@@ -142,7 +142,7 @@ def plot_heatmap_raw(sig, fs, wsize=10.0, labels=None, tail_cutoff=0, cmap='RdBu
        extent=[ts[0], ts[-1], 0, n_c],
        vmin=vmin, vmax=vmax, interpolation='none',
        aspect='auto', cmap=cmap)
-    plt.colorbar(mat, ax=ax)
+    #plt.colorbar(mat, ax=ax)
 
     ax.set_yticks(np.arange(n_c) + 0.5)
     if labels is None:

@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 
-def zscore(data_dict, method='robust', scale=1.4826):
+def zscore(signal, method='robust', scale=1.4826):
     """
     Z-Score the signal along a given axis.
 
@@ -48,6 +48,39 @@ def zscore(data_dict, method='robust', scale=1.4826):
         signal /= np.nanstd(signal, axis=0)
 
     return signal
+
+
+def welford_stats(next_obs, run_stats=None, burn=10, zskip=[-np.inf, np.inf],
+                  norm='znorm'):
+    if run_stats is None:
+        run_stats = {
+                'N': 0,
+                'mean': np.zeros_like(next_obs), 
+                'M2': np.zeros_like(next_obs)}
+
+    if run_stats['N'] > burn:
+        stdv = np.sqrt(run_stats['M2'] / run_stats['N'])
+        if (stdv == 0).any():
+            next_obs_zs = np.nan*np.zeros_like(next_obs)
+        else:
+            if norm=='znorm':
+                next_obs_zs = (next_obs - run_stats['mean']) / stdv
+            else:
+                next_obs_zs = next_obs / (stdv**2)
+        if ((next_obs_zs < zskip[0]).any() or (next_obs_zs > zskip[1]).any()):
+            return run_stats, next_obs_zs
+    else:
+        next_obs_zs = np.nan*np.zeros_like(next_obs)
+
+    run_stats['N'] += 1
+
+    delta = next_obs - run_stats['mean']
+    run_stats['mean'] += delta / run_stats['N']
+
+    delta2 = next_obs - run_stats['mean']
+    run_stats['M2'] += delta * delta2
+
+    return run_stats, next_obs_zs
 
 
 def running_zscore(signal, fs, win):

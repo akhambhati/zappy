@@ -372,4 +372,3 @@ def gcc_phat(signal, fs):
     # Compute the inverse FFT of the cross-channel product
     xcr = np.fft.fftshift(np.real(np.fft.ifft(FFT_GRID / np.abs(FFT_GRID), axis=0)), axes=0)
     return xcr, lags
-

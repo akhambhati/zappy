@@ -59,7 +59,8 @@ def ieeg_screening_pipeline(signal, fs, fs_ds=512, antialias_freq=250, drift_fre
     signal, fs_out = filters.downsample(signal, fs, fs_ds)
 
     # Remove Drift and DC-offset
-    signal = filters.high_pass_filter(signal, fs_out, corner_freq=drift_freq, stop_tol=10)
-    signal = signal - signal.mean(axis=0)
+    if drift_freq is None:
+        signal = filters.high_pass_filter(signal, fs_out, corner_freq=drift_freq, stop_tol=10)
+        signal = signal - signal.mean(axis=0)
 
     return signal, fs_out

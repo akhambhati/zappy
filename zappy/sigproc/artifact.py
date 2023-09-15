@@ -44,7 +44,7 @@ def local_outlier_factor(signal, n_neighbors=None):
 
     clf = LocalOutlierFactor(n_neighbors=(artifact_feats.shape[0] // 4) if n_neighbors is None else n_neighbors)
     outlier = clf.fit_predict(artifact_feats)
-    outlier_score = sp_stats.zscore(-1*clf.negative_outlier_factor_).clip(min=0)
+    outlier_score = -1*clf.negative_outlier_factor_
     return outlier_score
 
 
