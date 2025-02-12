@@ -167,7 +167,7 @@ def high_pass_filter(signal, fs, corner_freq, stop_tol=10):
     n_s, n_ch = signal.shape
 
     # Compute stop-band frequency
-    corner_freq = np.float(corner_freq)
+    corner_freq = float(corner_freq)
     stop_freq = (1 - stop_tol/100)*corner_freq
 
     # Get butterworth filter parameters
@@ -223,7 +223,7 @@ def low_pass_filter(signal, fs, corner_freq, stop_tol=10):
     n_s, n_ch = signal.shape
 
     # Compute stop-band frequency
-    corner_freq = np.float(corner_freq)
+    corner_freq = float(corner_freq)
     stop_freq = (1+stop_tol/100)*corner_freq
 
     # Get butterworth filter parameters
