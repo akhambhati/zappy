@@ -28,7 +28,7 @@ class ElectrodeContact(TypedDict):
 
     name: str
     index: int
-    coord: npt.NDArray[np.float_]
+    coord: npt.NDArray[np.float64]
 
 
 class VirtualContact(ElectrodeContact):
@@ -105,7 +105,7 @@ def make_virtual_bipolar_channels(electrode_groups: List[ElectrodeGroup]) -> Lis
     return vgroups
 
 
-def make_virtual_signal(signal: npt.NDArray[np.float_], electrode_groups: List[ElectrodeGroup]) -> npt.NDArray:
+def make_virtual_signal(signal: npt.NDArray[np.float64], electrode_groups: List[ElectrodeGroup]) -> npt.NDArray:
     vsignal = []
     reindex = []
     for vgrp in electrode_groups:
