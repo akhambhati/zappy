@@ -7,7 +7,7 @@ Apply Connectivity Metrics to raw or transformed intracranial EEG.
 
 
 import numpy as np
-
+import numpy.ma as ma
 
 def _tdot(X_cn, imag):
     """
@@ -36,7 +36,7 @@ def _tdot(X_cn, imag):
     return X_tdot
 
 
-def spectral_synchrony(signal, metric=None, cross_freq=False):
+def spectral_synchrony(signal, metric=None, cross_freq=False, signal_mask=None):
     """
     Compute inter-electrode synchrony of the iEEG signal based on its spectral
     characteristics.
@@ -62,6 +62,9 @@ def spectral_synchrony(signal, metric=None, cross_freq=False):
         the cross-frequency coupling.
         Default is False.
 
+    signal_mask: numpy.ndarray, dtype: bool, shape: [n_sample x n_freqs x n_chan]
+        Masking array where indices to be ignored contain TRUE.
+
     Returns
     -------
     if cross_freq is False:
@@ -76,6 +79,8 @@ def spectral_synchrony(signal, metric=None, cross_freq=False):
     n_ts, n_wv, n_ch = signal.shape
 
     X_cn = signal.copy()
+    if signal_mask is not None:
+        X_cn = ma.array(X_cn, mask=signal_mask)
 
     # Pre-compute the  magnitude
     X_a = np.abs(X_cn)
